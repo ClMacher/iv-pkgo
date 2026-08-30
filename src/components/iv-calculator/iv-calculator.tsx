@@ -187,7 +187,7 @@ export default function IvCalculator({ baseStats, pokemon }: IvCalculatorProps) 
         }
 
         const applyPrecomputedRanking = async () => {
-            if (!pokemon || !pokemon.dex) {
+            if (!pokemon || !pokemon.speciesId) {
                 return;
             }
 
@@ -195,9 +195,9 @@ export default function IvCalculator({ baseStats, pokemon }: IvCalculatorProps) 
 
             try {
                 const [greatRanking, ultraRanking, masterRanking] = await Promise.all([
-                    fetchPrecomputedRanking(pokemon.dex, 1500, { top: requestedTop }),
-                    fetchPrecomputedRanking(pokemon.dex, 2500, { top: requestedTop }),
-                    fetchPrecomputedRanking(pokemon.dex, 'master', { top: requestedTop }),
+                    fetchPrecomputedRanking(pokemon.speciesId, 1500, { top: requestedTop }),
+                    fetchPrecomputedRanking(pokemon.speciesId, 2500, { top: requestedTop }),
+                    fetchPrecomputedRanking(pokemon.speciesId, 'master', { top: requestedTop }),
                 ]);
 
                 const parseFullRanking = (data: any) => {

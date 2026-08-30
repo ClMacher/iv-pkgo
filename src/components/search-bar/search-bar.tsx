@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { searchLocalPokemon, searchLocalSuggestions } from '../../services/poke-api';
+import PokemonSprite from '../pokemon-sprite/pokemon-sprite';
 
 interface SearchBarProps {
     onSelectPokemon: (pokemon: any | null) => void;
@@ -73,9 +74,10 @@ export default function SearchBar({ onSelectPokemon }: SearchBarProps) {
                             }}
                             className="w-full text-left px-3 py-2 hover:bg-slate-700 transition-colors flex items-center gap-3"
                         >
-                            <img
-                                src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${s.dex}.png`}
-                                alt={s.speciesName}
+                            <PokemonSprite
+                                pokemon={s}
+                                variant="icon"
+                                size={24}
                                 className="w-6 h-6 object-contain"
                             />
                             <span className="capitalize">{s.speciesName} <span className="text-xs text-slate-400">#{s.dex}</span></span>

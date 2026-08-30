@@ -1,58 +1,47 @@
 import { useState, useEffect } from 'react';
 import SearchBar from './components/search-bar/search-bar';
 import IvCalculator from './components/iv-calculator/iv-calculator';
+import PokemonSprite from './components/pokemon-sprite/pokemon-sprite';
 import { getBaseStats } from './services/poke-api';
 
 interface HistoryItem {
-  id: number;
+  /** speciesId, no dex: Venusaur y Mega Venusaur son ambos el dex 3. */
+  id: string;
   name: string;
-  sprite: string;
   data: any;
 }
 
-const getPokemonSpriteUrl = (pokemon: any, mode: 'classic' | 'official' = 'classic') => {
-  if (!pokemon) return '';
+const HISTORY_KEY = 'poke_iv_history';
 
-  const dexId = pokemon.dex ?? pokemon.id;
-  const speciesId = pokemon.speciesId ? String(pokemon.speciesId) : '';
-  const normalizedSpecies = speciesId ? speciesId.replace(/_/g, '-') : '';
+function speciesKey(pokemon: any): string {
+  return String(pokemon?.speciesId ?? pokemon?.dex ?? '');
+}
 
-  const url = mode === 'official'
-    ? normalizedSpecies
-      ? `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${normalizedSpecies}.png`
-      : `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${dexId}.png`
-    : normalizedSpecies
-      ? `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${normalizedSpecies}.png`
-      : `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${dexId}.png`;
-
-  console.log('[sprite lookup]', {
-    name: pokemon.speciesName ?? pokemon.name,
-    dexId,
-    speciesId,
-    normalizedSpecies,
-    mode,
-    url,
-  });
-
-  return url;
-};
-
-const getFallbackSpriteUrl = (pokemon: any, mode: 'classic' | 'official' = 'classic') => {
-  if (!pokemon) return '';
-  const dexId = pokemon.dex ?? pokemon.id;
-  return mode === 'official'
-    ? `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${dexId}.png`
-    : `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${dexId}.png`;
-};
+/** El historial guardaba `id` numérico y una URL de sprite ya calculada. */
+function migrateHistory(stored: any): HistoryItem[] {
+  if (!Array.isArray(stored)) return [];
+  return stored
+    .filter((item) => item && item.data)
+    .map((item) => ({
+      id: speciesKey(item.data) || String(item.id ?? ''),
+      name: item.name ?? item.data?.speciesName ?? '',
+      data: item.data,
+    }))
+    .filter((item) => item.id);
+}
 
 export default function App() {
   const [selectedPokemon, setSelectedPokemon] = useState<any | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
   useEffect(() => {
-    const savedHistory = localStorage.getItem('poke_iv_history');
-    if (savedHistory) {
-      setHistory(JSON.parse(savedHistory));
+    const savedHistory = localStorage.getItem(HISTORY_KEY);
+    if (!savedHistory) return;
+    try {
+      setHistory(migrateHistory(JSON.parse(savedHistory)));
+    } catch (e) {
+      console.warn('Historial ilegible, se descarta.', e);
+      localStorage.removeItem(HISTORY_KEY);
     }
   }, []);
 
@@ -60,25 +49,24 @@ export default function App() {
     setSelectedPokemon(pokemon);
     if (!pokemon) return;
 
-    const officialSprite = getPokemonSpriteUrl(pokemon, 'classic');
+    const id = speciesKey(pokemon);
+    if (!id) return;
 
     setHistory((prevHistory) => {
-      const filtered = prevHistory.filter((item) => item.id !== pokemon.dex);
-      const newItem = {
-        id: pokemon.dex,
+      const filtered = prevHistory.filter((item) => item.id !== id);
+      const newItem: HistoryItem = {
+        id,
         name: pokemon.speciesName,
-        sprite: officialSprite,
-        data: pokemon
+        data: pokemon,
       };
       const updatedHistory = [newItem, ...filtered].slice(0, 5);
-      localStorage.setItem('poke_iv_history', JSON.stringify(updatedHistory));
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(updatedHistory));
       return updatedHistory;
     });
   };
 
-  const currentSprite = selectedPokemon ? getPokemonSpriteUrl(selectedPokemon, 'official') : '';
-  const fallbackCurrentSprite = selectedPokemon ? getFallbackSpriteUrl(selectedPokemon, 'official') : '';
   const baseStats = selectedPokemon ? getBaseStats(selectedPokemon) : undefined;
+  const selectedKey = selectedPokemon ? speciesKey(selectedPokemon) : '';
 
   return (
     <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center p-4">
@@ -100,25 +88,14 @@ export default function App() {
                 <button
                   key={item.id}
                   onClick={() => setSelectedPokemon(item.data)}
-                  className={`flex items-center gap-1 bg-slate-800 hover:bg-slate-700 border p-1.5 px-3 rounded-xl cursor-pointer transition-all ${selectedPokemon?.dex === item.id ? 'border-amber-500 bg-slate-700' : 'border-slate-700'
+                  className={`flex items-center gap-1 bg-slate-800 hover:bg-slate-700 border p-1.5 px-3 rounded-xl cursor-pointer transition-all ${selectedKey === item.id ? 'border-amber-500 bg-slate-700' : 'border-slate-700'
                     }`}
                 >
-                  <img
-                    src={item.sprite}
-                    alt={item.name}
+                  <PokemonSprite
+                    pokemon={item.data}
+                    variant="icon"
+                    size={24}
                     className="w-6 h-6 object-contain"
-                    onError={(e) => {
-                      const target = e.currentTarget as HTMLImageElement;
-                      const fallback = getFallbackSpriteUrl(item.data, 'classic');
-                      console.warn('[sprite fallback]', {
-                        name: item.name,
-                        attempted: target.currentSrc || target.src,
-                        fallback,
-                      });
-                      if (target.src !== fallback) {
-                        target.src = fallback;
-                      }
-                    }}
                   />
                   <span className="text-xs font-medium capitalize">{item.name}</span>
                 </button>
@@ -132,21 +109,11 @@ export default function App() {
           <div className="bg-slate-800 text-white p-4 rounded-2xl mb-4 border border-slate-700 flex items-center justify-between shadow-lg">
             <div className="flex items-center gap-4">
               <div className="bg-slate-900 p-2 rounded-xl border border-slate-700">
-                <img
-                  src={currentSprite}
-                  alt={selectedPokemon.speciesName}
-                  className="w-16 h-16 object-contain"
-                  onError={(e) => {
-                    const target = e.currentTarget as HTMLImageElement;
-                    console.warn('[sprite fallback]', {
-                      name: selectedPokemon.speciesName,
-                      attempted: target.currentSrc || target.src,
-                      fallback: fallbackCurrentSprite,
-                    });
-                    if (target.src !== fallbackCurrentSprite) {
-                      target.src = fallbackCurrentSprite;
-                    }
-                  }}
+                <PokemonSprite
+                  pokemon={selectedPokemon}
+                  variant="artwork"
+                  size={96}
+                  className="w-24 h-24 object-contain"
                 />
               </div>
               <div>
