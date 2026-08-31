@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import SearchBar from './components/search-bar/search-bar';
 import IvCalculator from './components/iv-calculator/iv-calculator';
 import PokemonSprite from './components/pokemon-sprite/pokemon-sprite';
 import { getBaseStats } from './services/poke-api';
+import gamemaster from './data/gamemaster.json';
 
 interface HistoryItem {
   /** speciesId, no dex: Venusaur y Mega Venusaur son ambos el dex 3. */
@@ -15,6 +16,23 @@ const HISTORY_KEY = 'poke_iv_history';
 
 function speciesKey(pokemon: any): string {
   return String(pokemon?.speciesId ?? pokemon?.dex ?? '');
+}
+
+function getFamilyRefs(pokemon: any): string[] {
+  if (!pokemon) return [];
+
+  const family = pokemon.family ?? {};
+  const refs = new Set<string>();
+
+  if (family.id) refs.add(String(family.id));
+  if (family.parent) refs.add(String(family.parent));
+  if (pokemon.speciesId) refs.add(String(pokemon.speciesId));
+
+  if (Array.isArray(family.evolutions)) {
+    family.evolutions.forEach((entry: string) => refs.add(String(entry)));
+  }
+
+  return [...refs];
 }
 
 /** El historial guardaba `id` numérico y una URL de sprite ya calculada. */
@@ -33,6 +51,11 @@ function migrateHistory(stored: any): HistoryItem[] {
 export default function App() {
   const [selectedPokemon, setSelectedPokemon] = useState<any | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [isDesktop, setIsDesktop] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth >= 768 : false,
+  );
+  const [historyOpen, setHistoryOpen] = useState(true);
+  const [familyOpen, setFamilyOpen] = useState(true);
 
   useEffect(() => {
     const savedHistory = localStorage.getItem(HISTORY_KEY);
@@ -43,6 +66,28 @@ export default function App() {
       console.warn('Historial ilegible, se descarta.', e);
       localStorage.removeItem(HISTORY_KEY);
     }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia('(min-width: 768px)');
+
+    const updateLayout = () => {
+      const desktop = mediaQuery.matches;
+      setIsDesktop(desktop);
+      if (desktop) {
+        setHistoryOpen(true);
+        setFamilyOpen(true);
+      } else {
+        setHistoryOpen(false);
+        setFamilyOpen(false);
+      }
+    };
+
+    updateLayout();
+    mediaQuery.addEventListener('change', updateLayout);
+    return () => mediaQuery.removeEventListener('change', updateLayout);
   }, []);
 
   const handleSelectPokemon = (pokemon: any | null) => {
@@ -68,69 +113,222 @@ export default function App() {
   const baseStats = selectedPokemon ? getBaseStats(selectedPokemon) : undefined;
   const selectedKey = selectedPokemon ? speciesKey(selectedPokemon) : '';
 
+  const familyMembers = useMemo(() => {
+    if (!selectedPokemon) return [];
+
+    const refs = new Set(getFamilyRefs(selectedPokemon));
+    const allPokemon = ((gamemaster as any).pokemon ?? []) as any[];
+    const unique = new Map<string, any>();
+
+    unique.set(speciesKey(selectedPokemon), selectedPokemon);
+
+    allPokemon
+      .filter((entry) => {
+        if (entry.speciesId === selectedPokemon.speciesId) return false;
+        const entryRefs = new Set(getFamilyRefs(entry));
+        return [...refs].some((ref) => entryRefs.has(ref));
+      })
+      .sort((a, b) => (a.dex ?? 0) - (b.dex ?? 0))
+      .forEach((entry) => {
+        if (!unique.has(speciesKey(entry))) {
+          unique.set(speciesKey(entry), entry);
+        }
+      });
+
+    return [...unique.values()];
+  }, [selectedPokemon]);
+
   return (
-    <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center p-4">
-      <h1 className="text-3xl font-black text-amber-400 mb-8 uppercase tracking-wide">
-        Poké IV Checker
-      </h1>
+    <div className="min-h-screen bg-slate-900 text-white p-4">
+      <div className="mx-auto max-w-[1200px]">
+        <h1 className="text-3xl font-black text-amber-400 mb-8 uppercase tracking-wide text-center">
+          Poké IV Checker
+        </h1>
 
-      <div className="w-full max-w-md space-y-4">
-        <SearchBar onSelectPokemon={handleSelectPokemon} />
-
-        {/* Historial */}
-        {history.length > 0 && (
-          <div className="bg-slate-800/50 border border-slate-700/50 p-3 rounded-2xl">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2 px-1">
-              Historial
-            </p>
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {history.map((item) => (
+        <div className="flex flex-col gap-4 md:grid md:grid-cols-[220px_minmax(0,1fr)_220px] md:items-start">
+          {isDesktop && history.length > 0 && (
+            <aside className="w-full md:w-full md:self-stretch">
+              <div className="bg-slate-800/50 border border-slate-700/50 p-3 rounded-2xl">
                 <button
-                  key={item.id}
-                  onClick={() => setSelectedPokemon(item.data)}
-                  className={`flex items-center gap-1 bg-slate-800 hover:bg-slate-700 border p-1.5 px-3 rounded-xl cursor-pointer transition-all ${selectedKey === item.id ? 'border-amber-500 bg-slate-700' : 'border-slate-700'
-                    }`}
+                  type="button"
+                  onClick={() => setHistoryOpen((open) => !open)}
+                  className="flex w-full items-center justify-between text-left"
                 >
-                  <PokemonSprite
-                    pokemon={item.data}
-                    variant="icon"
-                    size={24}
-                    className="w-6 h-6 object-contain"
-                  />
-                  <span className="text-xs font-medium capitalize">{item.name}</span>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1">
+                    Historial
+                  </p>
+                  <span className="text-slate-400 text-xs">{historyOpen ? '−' : '+'}</span>
                 </button>
-              ))}
-            </div>
-          </div>
-        )}
 
-        {/* Tarjeta de información */}
-        {selectedPokemon && baseStats && (
-          <div className="bg-slate-800 text-white p-4 rounded-2xl mb-4 border border-slate-700 flex items-center justify-between shadow-lg">
-            <div className="flex items-center gap-4">
-              <div className="bg-slate-900 p-2 rounded-xl border border-slate-700">
-                <PokemonSprite
-                  pokemon={selectedPokemon}
-                  variant="artwork"
-                  size={96}
-                  className="w-24 h-24 object-contain"
-                />
+                {historyOpen && (
+                  <div className="mt-2 flex flex-col gap-2">
+                    {history.map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => setSelectedPokemon(item.data)}
+                        className={`flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border p-1.5 px-3 rounded-xl cursor-pointer transition-all text-left ${selectedKey === item.id ? 'border-amber-500 bg-slate-700' : 'border-slate-700'}`}
+                      >
+                        <PokemonSprite
+                          pokemon={item.data}
+                          variant="icon"
+                          size={24}
+                          className="w-6 h-6 object-contain"
+                        />
+                        <span className="text-xs font-medium capitalize truncate">{item.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-              <div>
-                <p className="text-xs text-slate-400 font-bold uppercase">Nº {selectedPokemon.dex}</p>
-                <h2 className="text-xl font-bold capitalize text-amber-300">{selectedPokemon.speciesName}</h2>
+            </aside>
+          )}
+
+          {!isDesktop && history.length > 0 && (
+            <div className="w-full max-w-md mx-auto md:hidden">
+              <div className="bg-slate-800/50 border border-slate-700/50 p-3 rounded-2xl">
+                <button
+                  type="button"
+                  onClick={() => setHistoryOpen((open) => !open)}
+                  className="flex w-full items-center justify-between text-left"
+                >
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1">
+                    Historial
+                  </p>
+                  <span className="text-slate-400 text-xs">{historyOpen ? '−' : '+'}</span>
+                </button>
+
+                {historyOpen && (
+                  <div className="mt-2 flex flex-col gap-2">
+                    {history.map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => setSelectedPokemon(item.data)}
+                        className={`flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border p-1.5 px-3 rounded-xl cursor-pointer transition-all text-left ${selectedKey === item.id ? 'border-amber-500 bg-slate-700' : 'border-slate-700'}`}
+                      >
+                        <PokemonSprite
+                          pokemon={item.data}
+                          variant="icon"
+                          size={24}
+                          className="w-6 h-6 object-contain"
+                        />
+                        <span className="text-xs font-medium capitalize truncate">{item.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
+          )}
 
-            <div className="text-right text-xs text-slate-400 space-y-0.5">
-              <p>Atk: <span className="text-white font-mono">{baseStats.atk}</span></p>
-              <p>Def: <span className="text-white font-mono">{baseStats.def}</span></p>
-              <p>HP: <span className="text-white font-mono">{baseStats.hp}</span></p>
-            </div>
+          {isDesktop && history.length === 0 && <div className="hidden md:block" aria-hidden="true" />}
+
+          <div className="w-full max-w-[700px] mx-auto space-y-4 md:mx-auto md:min-w-0">
+            <SearchBar onSelectPokemon={handleSelectPokemon} />
+
+            {selectedPokemon && baseStats && (
+              <div className="bg-slate-800 text-white p-4 rounded-2xl mb-4 border border-slate-700 flex items-center justify-between shadow-lg">
+                <div className="flex items-center gap-4">
+                  <div className="bg-slate-900 p-2 rounded-xl border border-slate-700">
+                    <PokemonSprite
+                      pokemon={selectedPokemon}
+                      variant="artwork"
+                      size={96}
+                      className="w-24 h-24 object-contain"
+                    />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 font-bold uppercase">Nº {selectedPokemon.dex}</p>
+                    <h2 className="text-xl font-bold capitalize text-amber-300">{selectedPokemon.speciesName}</h2>
+                  </div>
+                </div>
+
+                <div className="text-right text-xs text-slate-400 space-y-0.5">
+                  <p>Atk: <span className="text-white font-mono">{baseStats.atk}</span></p>
+                  <p>Def: <span className="text-white font-mono">{baseStats.def}</span></p>
+                  <p>HP: <span className="text-white font-mono">{baseStats.hp}</span></p>
+                </div>
+              </div>
+            )}
+
+            <IvCalculator baseStats={baseStats} pokemon={selectedPokemon} />
           </div>
-        )}
 
-        <IvCalculator baseStats={baseStats} pokemon={selectedPokemon} />
+          {isDesktop && familyMembers.length > 0 && (
+            <aside className="w-full md:w-full md:self-stretch">
+              <div className="bg-slate-800/50 border border-slate-700/50 p-3 rounded-2xl">
+                <button
+                  type="button"
+                  onClick={() => setFamilyOpen((open) => !open)}
+                  className="flex w-full items-center justify-between text-left"
+                >
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1">
+                    Family
+                  </p>
+                  <span className="text-slate-400 text-xs">{familyOpen ? '−' : '+'}</span>
+                </button>
+
+                {familyOpen && (
+                  <div className="mt-2 flex flex-col gap-2">
+                    {familyMembers.map((member) => (
+                      <button
+                        key={speciesKey(member)}
+                        onClick={() => setSelectedPokemon(member)}
+                        className={`flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border p-1.5 px-3 rounded-xl cursor-pointer transition-all text-left ${selectedKey === speciesKey(member) ? 'border-amber-500 bg-slate-700' : 'border-slate-700'}`}
+                      >
+                        <PokemonSprite
+                          pokemon={member}
+                          variant="icon"
+                          size={24}
+                          className="w-6 h-6 object-contain"
+                        />
+                        <span className="text-xs font-medium capitalize truncate">{member.speciesName}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </aside>
+          )}
+
+          {!isDesktop && familyMembers.length > 0 && (
+            <div className="w-full max-w-md mx-auto md:hidden">
+              <div className="bg-slate-800/50 border border-slate-700/50 p-3 rounded-2xl">
+                <button
+                  type="button"
+                  onClick={() => setFamilyOpen((open) => !open)}
+                  className="flex w-full items-center justify-between text-left"
+                >
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1">
+                    Family
+                  </p>
+                  <span className="text-slate-400 text-xs">{familyOpen ? '−' : '+'}</span>
+                </button>
+
+                {familyOpen && (
+                  <div className="mt-2 flex flex-col gap-2">
+                    {familyMembers.map((member) => (
+                      <button
+                        key={speciesKey(member)}
+                        onClick={() => setSelectedPokemon(member)}
+                        className={`flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border p-1.5 px-3 rounded-xl cursor-pointer transition-all text-left ${selectedKey === speciesKey(member) ? 'border-amber-500 bg-slate-700' : 'border-slate-700'}`}
+                      >
+                        <PokemonSprite
+                          pokemon={member}
+                          variant="icon"
+                          size={24}
+                          className="w-6 h-6 object-contain"
+                        />
+                        <span className="text-xs font-medium capitalize truncate">{member.speciesName}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {isDesktop && familyMembers.length === 0 && <div className="hidden md:block" aria-hidden="true" />}
+        </div>
       </div>
     </div>
   );

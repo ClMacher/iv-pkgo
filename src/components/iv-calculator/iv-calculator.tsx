@@ -409,7 +409,7 @@ export default function IvCalculator({ baseStats, pokemon }: IvCalculatorProps) 
     };
 
     return (
-        <div className="max-w-md mx-auto bg-slate-800 text-white p-6 rounded-2xl shadow-xl border border-slate-700 space-y-6">
+        <div className="max-w-screen-md mx-auto bg-slate-800 text-white p-6 rounded-2xl shadow-xl border border-slate-700 space-y-6">
             <h2 className="text-xl font-bold text-center">Calculadora de IVs y PC</h2>
 
             {/* Resultados Normales */}
@@ -535,13 +535,40 @@ export default function IvCalculator({ baseStats, pokemon }: IvCalculatorProps) 
                     {/* Cabecera con posición actual y totals */}
                     <div className="text-center mb-3">
                         {selectedLeague === 'great' && (
-                            <p className="text-sm text-slate-400">Posición actual: <span className="font-bold text-white">{currentRankGreat ? `#${currentRankGreat} / ${totalGreat}` : 'N/A'}</span> — Nivel sugerido: <span className="font-bold">{suggestedLevel ?? '—'}</span> (CP {suggestedCp ?? '—'})</p>
+                            <p className="text-sm text-slate-400">
+                                Posición actual:
+                                <span className={`ml-1 inline-flex items-center rounded-full border px-2 py-0.5 font-bold ${currentRankGreat && currentRankGreat <= 10 ? 'border-emerald-400/50 bg-emerald-500/15 text-emerald-300' : 'border-slate-700 bg-slate-800 text-white'}`}>
+                                    {currentRankGreat ? `#${currentRankGreat}` : 'N/A'}
+                                </span>
+                                <span className="mx-1 text-slate-500">/</span>
+                                <span className="font-bold text-white">{totalGreat}</span>
+                                <span className="ml-2 text-slate-500">—</span>
+                                Nivel sugerido: <span className="font-bold">{suggestedLevel ?? '—'}</span> (CP {suggestedCp ?? '—'})
+                            </p>
                         )}
                         {selectedLeague === 'ultra' && (
-                            <p className="text-sm text-slate-400">Posición actual: <span className="font-bold text-white">{currentRankUltra ? `#${currentRankUltra} / ${totalUltra}` : 'N/A'}</span> — Nivel sugerido: <span className="font-bold">{suggestedLevel ?? '—'}</span> (CP {suggestedCp ?? '—'})</p>
+                            <p className="text-sm text-slate-400">
+                                Posición actual:
+                                <span className={`ml-1 inline-flex items-center rounded-full border px-2 py-0.5 font-bold ${currentRankUltra && currentRankUltra <= 10 ? 'border-emerald-400/50 bg-emerald-500/15 text-emerald-300' : 'border-slate-700 bg-slate-800 text-white'}`}>
+                                    {currentRankUltra ? `#${currentRankUltra}` : 'N/A'}
+                                </span>
+                                <span className="mx-1 text-slate-500">/</span>
+                                <span className="font-bold text-white">{totalUltra}</span>
+                                <span className="ml-2 text-slate-500">—</span>
+                                Nivel sugerido: <span className="font-bold">{suggestedLevel ?? '—'}</span> (CP {suggestedCp ?? '—'})
+                            </p>
                         )}
                         {selectedLeague === 'master' && (
-                            <p className="text-sm text-slate-400">Posición actual: <span className="font-bold text-white">{currentRankMaster ? `#${currentRankMaster} / ${totalMaster}` : 'N/A'}</span> — Nivel sugerido: <span className="font-bold">{suggestedLevel ?? '—'}</span> (CP {suggestedCp ?? '—'})</p>
+                            <p className="text-sm text-slate-400">
+                                Posición actual:
+                                <span className={`ml-1 inline-flex items-center rounded-full border px-2 py-0.5 font-bold ${currentRankMaster && currentRankMaster <= 10 ? 'border-emerald-400/50 bg-emerald-500/15 text-emerald-300' : 'border-slate-700 bg-slate-800 text-white'}`}>
+                                    {currentRankMaster ? `#${currentRankMaster}` : 'N/A'}
+                                </span>
+                                <span className="mx-1 text-slate-500">/</span>
+                                <span className="font-bold text-white">{totalMaster}</span>
+                                <span className="ml-2 text-slate-500">—</span>
+                                Nivel sugerido: <span className="font-bold">{suggestedLevel ?? '—'}</span> (CP {suggestedCp ?? '—'})
+                            </p>
                         )}
                     </div>
 
@@ -550,7 +577,7 @@ export default function IvCalculator({ baseStats, pokemon }: IvCalculatorProps) 
                         <table className="w-full text-left text-sm">
                             <thead>
                                 <tr className="text-slate-400 text-xs uppercase">
-                                    <th className="px-2 py-1">#</th>
+                                    <th className="px-2 py-1">Pos.</th>
                                     <th className="px-2 py-1">IV</th>
                                     <th className="px-2 py-1">Sum</th>
                                     <th className="px-2 py-1">Stat Prod</th>
@@ -562,9 +589,14 @@ export default function IvCalculator({ baseStats, pokemon }: IvCalculatorProps) 
                             <tbody>
                                 {getVisibleRankingSlice(selectedLeague === 'great' ? topGreatIvs : selectedLeague === 'ultra' ? topUltraIvs : topMasterIvs).map((it, idx) => {
                                     const isCurrent = it.atk === attack && it.def === defense && it.hp === stamina;
+                                    const isTopTier = idx < 10;
                                     return (
                                         <tr key={`${selectedLeague}-${it.atk}-${it.def}-${it.hp}`} className={`${isCurrent ? 'bg-amber-600/20' : 'bg-slate-800'} border-b border-slate-700`}>
-                                            <td className="px-2 py-2 w-8">{idx + 1}</td>
+                                            <td className="px-2 py-2 w-12">
+                                                <span className={`inline-flex min-w-9 justify-center rounded-full border px-1.5 py-1 text-[11px] font-black ${isTopTier ? 'border-emerald-400/50 bg-emerald-500/15 text-emerald-300 shadow-[0_0_0_1px_rgba(16,185,129,0.2)]' : 'border-slate-600 bg-slate-700 text-slate-200'} ${isCurrent ? 'ring-2 ring-amber-300/70' : ''}`}>
+                                                    #{idx + 1}
+                                                </span>
+                                            </td>
                                             <td className="px-2 py-2 font-medium">{it.atk}/{it.def}/{it.hp}</td>
                                             <td className="px-2 py-2 text-slate-400">{it.sum}</td>
                                             <td className="px-2 py-2 font-mono text-amber-300">{Number(it.statProduct ?? 0).toLocaleString()}</td>

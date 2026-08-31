@@ -44,7 +44,7 @@ export default function SearchBar({ onSelectPokemon }: SearchBarProps) {
     };
 
     return (
-        <form onSubmit={handleSearch} className="max-w-md mx-auto mb-6 relative">
+        <form onSubmit={handleSearch} className="max-w-screen-md mx-auto mb-6 relative">
             <div className="flex gap-2">
                 <input
                     type="text"
