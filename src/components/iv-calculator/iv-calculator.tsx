@@ -409,7 +409,7 @@ export default function IvCalculator({ baseStats, pokemon }: IvCalculatorProps) 
     };
 
     return (
-        <div className="max-w-screen-md mx-auto bg-slate-800 text-white p-6 rounded-2xl shadow-xl border border-slate-700 space-y-6">
+        <div className="bg-slate-800 text-white p-6 rounded-2xl shadow-xl border border-slate-700 space-y-6">
             <h2 className="text-xl font-bold text-center">Calculadora de IVs y PC</h2>
 
             {/* Resultados Normales */}
