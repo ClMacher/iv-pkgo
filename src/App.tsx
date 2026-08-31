@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import SearchBar from './components/search-bar/search-bar';
 import IvCalculator from './components/iv-calculator/iv-calculator';
 import PokemonSprite from './components/pokemon-sprite/pokemon-sprite';
-import { getBaseStats } from './services/poke-api';
+import { getBaseStats, specialForm } from './services/poke-api';
 
 interface HistoryItem {
   /** speciesId, no dex: Venusaur y Mega Venusaur son ambos el dex 3. */
@@ -12,6 +12,15 @@ interface HistoryItem {
 }
 
 const HISTORY_KEY = 'poke_iv_history';
+
+/**
+ * Colores de las formas especiales. Son los mismos tonos que usa el halo de
+ * PokemonSprite, para que la tarjeta y el sprite no digan cosas distintas.
+ */
+const FORM_STYLE = {
+  shadow: { label: 'Shadow', color: '#a855f7' },
+  mega: { label: 'Mega', color: '#22d3ee' },
+} as const;
 
 function speciesKey(pokemon: any): string {
   return String(pokemon?.speciesId ?? pokemon?.dex ?? '');
@@ -66,6 +75,8 @@ export default function App() {
   };
 
   const baseStats = selectedPokemon ? getBaseStats(selectedPokemon) : undefined;
+  const form = specialForm(selectedPokemon);
+  const formStyle = form ? FORM_STYLE[form] : null;
   const selectedKey = selectedPokemon ? speciesKey(selectedPokemon) : '';
 
   return (
@@ -106,9 +117,15 @@ export default function App() {
 
         {/* Tarjeta de información */}
         {selectedPokemon && baseStats && (
-          <div className="bg-slate-800 text-white p-4 rounded-2xl mb-4 border border-slate-700 flex items-center justify-between shadow-lg">
+          <div
+            className="bg-slate-800 text-white p-4 rounded-2xl mb-4 border border-slate-700 flex items-center justify-between shadow-lg"
+            style={formStyle ? { borderColor: `${formStyle.color}66` } : undefined}
+          >
             <div className="flex items-center gap-4">
-              <div className="bg-slate-900 p-2 rounded-xl border border-slate-700">
+              <div
+                className="bg-slate-900 p-2 rounded-xl border border-slate-700"
+                style={formStyle ? { borderColor: `${formStyle.color}80` } : undefined}
+              >
                 <PokemonSprite
                   pokemon={selectedPokemon}
                   variant="artwork"
@@ -117,7 +134,21 @@ export default function App() {
                 />
               </div>
               <div>
-                <p className="text-xs text-slate-400 font-bold uppercase">Nº {selectedPokemon.dex}</p>
+                <p className="text-xs text-slate-400 font-bold uppercase flex items-center gap-2">
+                  Nº {selectedPokemon.dex}
+                  {formStyle && (
+                    <span
+                      className="px-1.5 py-px rounded text-[10px] tracking-wide"
+                      style={{
+                        color: formStyle.color,
+                        backgroundColor: `${formStyle.color}26`,
+                        border: `1px solid ${formStyle.color}59`,
+                      }}
+                    >
+                      {formStyle.label}
+                    </span>
+                  )}
+                </p>
                 <h2 className="text-xl font-bold capitalize text-amber-300">{selectedPokemon.speciesName}</h2>
               </div>
             </div>

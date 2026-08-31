@@ -1,4 +1,4 @@
-import gamemaster from "../data/gamemaster.json";
+import gamemaster from "../data/gamemaster.json" with { type: "json" };
 
 /**
  * Resolución de sprites por forma.
@@ -23,6 +23,7 @@ export type SpriteVariant = "icon" | "artwork";
 
 const GO_ASSETS =
   "https://raw.githubusercontent.com/PokeMiners/pogo_assets/master/Images/Pokemon/Addressable%20Assets";
+const LOCAL_SPRITES = "/sprites";
 const POKEAPI_SPRITES =
   "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon";
 
@@ -246,9 +247,6 @@ export function splitSpeciesId(speciesId: string, dex: number): SplitSpecies {
   return { base: speciesId, form: [], isShadow: false };
 }
 
-export function isShadowForm(pokemon: any): boolean {
-  return String(pokemon?.speciesId ?? "").endsWith("_shadow");
-}
 
 function goFormToken(form: string[]): string {
   if (form.length === 0) return "";
@@ -263,7 +261,7 @@ function pokeApiUrl(id: number, variant: SpriteVariant): string {
 }
 
 /**
- * URLs a probar en orden. El componente va bajando por la lista cuando una
+ * URLs remotas a probar en orden. El componente va bajando por la lista cuando una
  * falla, así que la última tiene que ser siempre una que exista.
  *
  * Para la tarjeta grande (`artwork`) se antepone el arte oficial de PokeAPI,
@@ -276,7 +274,7 @@ function pokeApiUrl(id: number, variant: SpriteVariant): string {
  * GO no tiene assets propios para las formas Shadow: se usa el del Pokémon
  * normal y el aura la pinta el componente.
  */
-export function getSpriteCandidates(
+export function getRemoteSpriteCandidates(
   pokemon: any,
   variant: SpriteVariant = "icon",
 ): string[] {
@@ -315,4 +313,40 @@ export function getSpriteCandidates(
   urls.push(pokeApiUrl(dex, variant));
 
   return [...new Set(urls)];
+}
+
+/**
+ * Ruta al icono ya descargado por `scripts/download-sprites.js`.
+ *
+ * No hace falta manifiesto: el script nombra cada archivo con el speciesId de
+ * la forma base, así que la ruta se deduce. Si el archivo no está —una forma
+ * recién añadida al gamemaster, por ejemplo—, el `onError` del componente cae
+ * al siguiente candidato y el sprite se ve igual desde remoto.
+ *
+ * Sólo para la variante `icon`. El archivo local es de 96 px y en la tarjeta
+ * grande se vería borroso; ahí sigue mandando el arte oficial de PokeAPI.
+ */
+function getLocalSprite(pokemon: any, variant: SpriteVariant): string | null {
+  if (!pokemon || variant !== "icon") return null;
+
+  const speciesId = String(pokemon.speciesId ?? "").replace(/_shadow$/, "");
+  return speciesId ? `${LOCAL_SPRITES}/${speciesId}.webp` : null;
+}
+
+/**
+ * Lista definitiva para el componente: primero el archivo propio, y detrás la
+ * cadena remota como red de seguridad.
+ *
+ * Es lo que hace que sincronizar los sprites nunca sea urgente: una forma que
+ * todavía no se ha descargado se sigue viendo, sólo que más lenta.
+ */
+export function getSpriteCandidates(
+  pokemon: any,
+  variant: SpriteVariant = "icon",
+): string[] {
+  const remotas = getRemoteSpriteCandidates(pokemon, variant);
+  if (remotas.length === 0) return [];
+
+  const local = getLocalSprite(pokemon, variant);
+  return local ? [local, ...remotas] : remotas;
 }

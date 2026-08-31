@@ -67,6 +67,34 @@ export function getBaseStats(pokemon: PvPokePokemon) {
   };
 }
 
+/**
+ * El gamemaster rellena con `none` el segundo tipo de los Pokémon de un solo
+ * tipo —806 de las 1742 entradas—, así que hay que descartarlo antes de
+ * pintar nada o la mitad de la lista mostraría una etiqueta vacía.
+ */
+export function pokemonTypes(pokemon: any): string[] {
+  return ((pokemon?.types ?? []) as string[]).filter((t) => t && t !== "none");
+}
+
+export type SpecialForm = "shadow" | "mega" | null;
+
+/**
+ * Marca de forma especial, leída de los tags del gamemaster y no del nombre.
+ *
+ * Vale la pena la distinción: el tag `mega` también cubre a Kyogre y Groudon
+ * Primal, que en GO usan la misma mecánica pero no llevan `_mega` en el
+ * speciesId. Buscando por el sufijo se quedarían fuera.
+ *
+ * Ninguna entrada es shadow y mega a la vez, así que devolver una sola marca
+ * alcanza.
+ */
+export function specialForm(pokemon: any): SpecialForm {
+  const tags = (pokemon?.tags ?? []) as string[];
+  if (tags.includes("shadow")) return "shadow";
+  if (tags.includes("mega")) return "mega";
+  return null;
+}
+
 export async function fetchCpMultipliers(): Promise<Record<number, number>> {
   try {
     const res = await fetch("https://pogoapi.net/api/v1/cp_multiplier.json");

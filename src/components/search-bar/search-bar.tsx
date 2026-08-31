@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { searchLocalPokemon, searchLocalSuggestions } from '../../services/poke-api';
+import { searchLocalPokemon, searchLocalSuggestions, pokemonTypes } from '../../services/poke-api';
 import PokemonSprite from '../pokemon-sprite/pokemon-sprite';
+import TypeBadge from '../type-badge/type-badge';
 
 interface SearchBarProps {
     onSelectPokemon: (pokemon: any | null) => void;
@@ -63,7 +64,7 @@ export default function SearchBar({ onSelectPokemon }: SearchBarProps) {
                 </button>
             </div>
             {isInputFocused && suggestions.length > 0 && (
-                <div className="mt-2 bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+                <div className="absolute left-0 right-0 z-20 mt-2 max-h-96 overflow-y-auto bg-slate-800 border border-slate-700 rounded-xl shadow-xl">
                     {suggestions.map((s) => (
                         <button
                             key={s.speciesId}
@@ -72,15 +73,23 @@ export default function SearchBar({ onSelectPokemon }: SearchBarProps) {
                                 e.preventDefault();
                                 handleSelectSuggestion(s);
                             }}
-                            className="w-full text-left px-3 py-2 hover:bg-slate-700 transition-colors flex items-center gap-3"
+                            className="w-full text-left px-3 py-2 hover:bg-slate-700 transition-colors flex items-center gap-3 border-b border-slate-700/60 last:border-b-0"
                         >
                             <PokemonSprite
                                 pokemon={s}
                                 variant="icon"
-                                size={24}
-                                className="w-6 h-6 object-contain"
+                                size={48}
+                                className="w-12 h-12 object-contain shrink-0"
                             />
-                            <span className="capitalize">{s.speciesName} <span className="text-xs text-slate-400">#{s.dex}</span></span>
+                            <span className="flex-1 min-w-0">
+                                <span className="block capitalize truncate font-semibold">{s.speciesName}</span>
+                                <span className="mt-1 flex flex-wrap gap-1">
+                                    {pokemonTypes(s).map((t) => (
+                                        <TypeBadge key={t} type={t} />
+                                    ))}
+                                </span>
+                            </span>
+                            <span className="shrink-0 text-sm text-slate-400 tabular-nums">#{s.dex}</span>
                         </button>
                     ))}
                 </div>
