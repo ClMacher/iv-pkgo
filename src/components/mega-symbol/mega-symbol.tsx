@@ -1,7 +1,7 @@
 /**
  * Marca de Mega Evolución.
  *
- * `public/mega-stone.webp` (192 px, 8 KB) sale de recortar la esfera de una
+ * `public/assets/indicators/mega-stone.webp` (192 px, 8 KB) sale de recortar la esfera de una
  * imagen de 720x1280 que pesaba 235 KB: `extract({ left: 196, top: 476, width:
  * 328, height: 328 })`, máscara circular y `resize`. El original ya no está en
  * el repo, así que si hace falta regenerarlo a otro tamaño hay que volver a
@@ -13,7 +13,7 @@
 export default function MegaSymbol({ className }: { className?: string }) {
     return (
         <img
-            src="/mega-stone.webp"
+            src="/assets/indicators/mega-stone.webp"
             alt=""
             aria-hidden="true"
             className={className}

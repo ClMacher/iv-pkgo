@@ -6,6 +6,7 @@ import { getBaseStats, specialForm, pokemonTypes } from './services/poke-api';
 import { typeGradient, MEGA_GRADIENT } from './services/type-colors';
 import TypeBadge from './components/type-badge/type-badge';
 import MegaSymbol from './components/mega-symbol/mega-symbol';
+import ShadowSymbol from './components/shadow-symbol/shadow-symbol';
 import gamemaster from './data/gamemaster.json';
 
 interface HistoryItem {
@@ -174,52 +175,18 @@ export default function App() {
         </h1>
 
         <div className="mx-auto max-w-[1200px] space-y-4">
-          <SearchBar onSelectPokemon={handleSelectPokemon} />
-
-          {/*
-            El historial va aquí, pegado al buscador, y no en una columna: es
-            una ayuda de navegación —"vuelve a lo que miraste"— y su sitio
-            natural está junto a la otra forma de elegir Pokémon. De paso deja
-            las dos columnas de abajo enteras para lo que de verdad importa.
-          */}
-          {history.length > 0 && (
-            <div className="rounded-2xl border border-slate-700/50 bg-slate-800/50 p-3">
-              <p className="mb-2 px-1 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
-                Historial
-              </p>
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {history.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => setSelectedPokemon(item.data)}
-                    className={`flex shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-3 py-1.5 transition-colors ${
-                      selectedKey === item.id
-                        ? 'border-amber-500 bg-slate-700'
-                        : 'border-slate-700 bg-slate-800 hover:bg-slate-700'
-                    }`}
-                  >
-                    <PokemonSprite
-                      pokemon={item.data}
-                      variant="icon"
-                      size={28}
-                      className="h-7 w-7 object-contain"
-                    />
-                    <span className="whitespace-nowrap text-xs font-medium capitalize">
-                      {item.name}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+          <SearchBar
+            onSelectPokemon={handleSelectPokemon}
+            history={history}
+            selectedPokemonId={selectedKey}
+          />
 
           {/* Sin Pokémon elegido no hay tarjeta, y la calculadora ocupa todo. */}
           <div
-            className={`flex flex-col gap-4 ${
-              selectedPokemon && baseStats
-                ? 'lg:grid lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start'
-                : ''
-            }`}
+            className={`flex flex-col gap-4 ${selectedPokemon && baseStats
+              ? 'lg:grid lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start'
+              : ''
+              }`}
           >
             {selectedPokemon && baseStats && (
               <div
@@ -235,10 +202,13 @@ export default function App() {
                       pokemon={selectedPokemon}
                       variant="artwork"
                       size={144}
-                      className="h-32 w-32 object-contain drop-shadow-[0_6px_16px_rgba(0,0,0,0.55)]"
+                      className="h-64 w-64 object-contain drop-shadow-[0_6px_16px_rgba(0,0,0,0.55)]"
                     />
                     {form === 'mega' && (
-                      <MegaSymbol className="absolute -bottom-1 -left-1 h-9 w-9 rounded-full ring-2 ring-slate-900/80" />
+                      <MegaSymbol className="absolute -bottom-1 -left-1 h-10 w-10" />
+                    )}
+                    {form === 'shadow' && (
+                      <ShadowSymbol className="absolute -bottom-1 -left-1 h-10 w-10" />
                     )}
                   </span>
 
@@ -279,7 +249,7 @@ export default function App() {
                 {familyMembers.length > 1 && (
                   <div className="relative mt-5 border-t border-white/10 pt-4">
                     <p className="mb-3 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
-                      Evoluciones
+                      Familia
                     </p>
                     <div className="grid grid-cols-3 gap-2">
                       {familyMembers.map((member) => {
@@ -288,18 +258,25 @@ export default function App() {
                           <button
                             key={speciesKey(member)}
                             onClick={() => setSelectedPokemon(member)}
-                            className={`flex cursor-pointer flex-col items-center gap-1 rounded-xl border px-1 py-2 transition-colors ${
-                              activo
-                                ? 'border-amber-500 bg-slate-900/80'
-                                : 'border-white/10 bg-slate-900/40 hover:bg-slate-900/70'
-                            }`}
+                            className={`flex cursor-pointer flex-col items-center gap-1 rounded-xl border px-1 py-2 transition-colors ${activo
+                              ? 'border-amber-500 bg-slate-900/80'
+                              : 'border-white/10 bg-slate-900/40 hover:bg-slate-900/70'
+                              }`}
                           >
-                            <PokemonSprite
-                              pokemon={member}
-                              variant="icon"
-                              size={40}
-                              className="h-10 w-10 object-contain"
-                            />
+                            <span className="relative inline-flex">
+                              <PokemonSprite
+                                pokemon={member}
+                                variant="icon"
+                                size={40}
+                                className="h-10 w-10 object-contain"
+                              />
+                              {specialForm(member) === 'mega' && (
+                                <MegaSymbol className="absolute -bottom-1 -left-1 h-5 w-5" />
+                              )}
+                              {specialForm(member) === 'shadow' && (
+                                <ShadowSymbol className="absolute -bottom-1 -left-1 h-5 w-5" />
+                              )}
+                            </span>
                             <span className="line-clamp-2 w-full text-center text-[10px] font-medium capitalize leading-tight text-slate-300">
                               {member.speciesName}
                             </span>

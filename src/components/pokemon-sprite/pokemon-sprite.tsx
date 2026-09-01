@@ -14,9 +14,7 @@ interface PokemonSpriteProps {
  * Muestra el sprite de una forma concreta, no el de su forma base.
  *
  * Va bajando por las URLs que propone el servicio hasta que una carga: primero
- * el arte de Pokémon GO, y si esa forma no tiene asset, PokeAPI. A las formas
- * Shadow les pinta el aura encima, porque comparten sprite con el Pokémon
- * normal y si no serían indistinguibles.
+ * el arte de Pokémon GO, y si esa forma no tiene asset, PokeAPI.
  */
 export default function PokemonSprite({
     pokemon,

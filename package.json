@@ -4,8 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/download-gamemaster.js && node scripts/download-sprites.js",
-    "prebuild": "node scripts/download-gamemaster.js && node scripts/download-sprites.js",
+    "predev": "node scripts/download-gamemaster.js && node scripts/download-sprites.js && node scripts/download-pokeminers-assets.js",
+    "prebuild": "node scripts/download-gamemaster.js && node scripts/download-sprites.js && node scripts/download-pokeminers-assets.js",
     "dev": "vite",
     "build": "tsc && vite build",
     "lint": "oxlint",
