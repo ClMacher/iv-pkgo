@@ -9,9 +9,10 @@ interface SearchBarProps {
     onSelectPokemon: (pokemon: any | null) => void;
     history?: Array<{ id: string; name: string; data: any }>;
     selectedPokemonId?: string;
+    onClearHistory?: () => void;
 }
 
-export default function SearchBar({ onSelectPokemon, history = [], selectedPokemonId }: SearchBarProps) {
+export default function SearchBar({ onSelectPokemon, history = [], selectedPokemonId, onClearHistory }: SearchBarProps) {
     const [query, setQuery] = useState('');
     const [error, setError] = useState(false);
     const [suggestions, setSuggestions] = useState<any[]>([]);
@@ -86,6 +87,17 @@ export default function SearchBar({ onSelectPokemon, history = [], selectedPokem
                         <div className={`${suggestions.length > 0 ? 'border-b border-slate-700/60' : ''} p-3`}>
                             <p className="mb-2 px-1 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
                                 Historial
+                                {onClearHistory && (
+                                    <button
+                                        type="button"
+                                        onMouseDown={(event) => event.preventDefault()}
+                                        onClick={onClearHistory}
+                                        className="float-right cursor-pointer text-[10px] font-semibold normal-case tracking-normal text-slate-500 hover:text-red-300"
+                                        title="Eliminar todo el historial"
+                                    >
+                                        Eliminar todos
+                                    </button>
+                                )}
                             </p>
                             <div className="flex gap-2 overflow-x-auto pb-1">
                                 {history.map((item) => (

@@ -1,9 +1,19 @@
 import { useState, useEffect } from 'react';
 import { fetchCpMultipliers, fetchPrecomputedRanking } from '../../services/poke-api';
 
+export interface IvValues {
+    attack: number;
+    defense: number;
+    stamina: number;
+    level: number;
+}
+
 interface IvCalculatorProps {
     baseStats?: { atk: number; def: number; hp: number };
     pokemon?: { dex: number; speciesName: string; speciesId: string } | null;
+    ivValues: IvValues;
+    onIvValuesChange: (values: IvValues) => void;
+    onPinAnalysis?: () => void;
 }
 
 // Valores sincronizados con https://pogoapi.net/api/v1/cp_multiplier.json
@@ -109,11 +119,13 @@ const CPM_TABLE: Record<number, number> = {
     50: 0.84029999
 };
 
-export default function IvCalculator({ baseStats, pokemon }: IvCalculatorProps) {
-    const [attack, setAttack] = useState<number>(15);
-    const [defense, setDefense] = useState<number>(15);
-    const [stamina, setStamina] = useState<number>(15);
-    const [level, setLevel] = useState<number>(20);
+export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesChange, onPinAnalysis }: IvCalculatorProps) {
+    const { attack, defense, stamina, level } = ivValues;
+    const setAttack = (value: number) => onIvValuesChange({ ...ivValues, attack: value });
+    const setDefense = (value: number) => onIvValuesChange({ ...ivValues, defense: value });
+    const setStamina = (value: number) => onIvValuesChange({ ...ivValues, stamina: value });
+    const setLevel = (value: number) => onIvValuesChange({ ...ivValues, level: value });
+    const [ivInputMode, setIvInputMode] = useState<'buttons' | 'slider' | 'manual'>('buttons');
     const [cp, setCp] = useState<number>(0);
     const [cpMultipliers, setCpMultipliers] = useState<Record<number, number> | null>(null);
 
@@ -408,6 +420,28 @@ export default function IvCalculator({ baseStats, pokemon }: IvCalculatorProps) 
         return 'text-gray-400';
     };
 
+    const getRankCardStyle = (rank: number | null, exceedsLimit: boolean) => {
+        if (exceedsLimit) {
+            return 'border-red-400/80 bg-red-950/60 ring-1 ring-red-400/40';
+        }
+        if (rank === 1) {
+            return 'border-amber-300/80 bg-amber-950/50 ring-1 ring-amber-300/40';
+        }
+        if (rank !== null && rank <= 10) {
+            return 'border-emerald-400/70 bg-emerald-950/40 ring-1 ring-emerald-400/30';
+        }
+        if (rank !== null && rank <= 200) {
+            return 'border-blue-400/70 bg-blue-950/40 ring-1 ring-blue-400/30';
+        }
+        return 'border-slate-700 bg-slate-800/80';
+    };
+
+    const ivControls = [
+        { label: 'Ataque', value: attack, setValue: setAttack, labelClass: 'text-red-400', sliderClass: 'accent-red-500' },
+        { label: 'Defensa', value: defense, setValue: setDefense, labelClass: 'text-blue-400', sliderClass: 'accent-blue-500' },
+        { label: 'Salud', value: stamina, setValue: setStamina, labelClass: 'text-green-400', sliderClass: 'accent-green-500' },
+    ] as const;
+
     return (
         <div className="bg-slate-800 text-white p-6 rounded-2xl shadow-xl border border-slate-700 space-y-6">
             <h2 className="text-xl font-bold text-center">Calculadora de IVs y PC</h2>
@@ -416,9 +450,23 @@ export default function IvCalculator({ baseStats, pokemon }: IvCalculatorProps) 
 
             {/* Selector de Nivel */}
             <div className="bg-slate-900 p-3 rounded-xl border border-slate-800">
-                <div className="flex justify-between text-sm mb-1">
+                <div className="mb-1 flex items-center justify-between gap-3 text-sm">
                     <span className="font-medium text-amber-400">Nivel del Pokémon</span>
-                    <span className="font-bold font-mono">{level}</span>
+                    <input
+                        type="number"
+                        min="1"
+                        max="50"
+                        step="1"
+                        value={level}
+                        onChange={(event) => {
+                            const nextValue = Number(event.target.value);
+                            if (Number.isInteger(nextValue) && nextValue >= 1 && nextValue <= 50) {
+                                setLevel(nextValue);
+                            }
+                        }}
+                        className="w-16 rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-right font-mono text-sm text-white outline-none focus:border-amber-400"
+                        aria-label="Nivel del Pokémon"
+                    />
                 </div>
                 <input
                     type="range"
@@ -431,77 +479,150 @@ export default function IvCalculator({ baseStats, pokemon }: IvCalculatorProps) 
                 />
             </div>
 
-            {/* Sliders de IV */}
+            {/* Selector y controles de IV */}
             <div className="space-y-4">
-                <div>
-                    <div className="flex justify-between text-xs mb-1">
-                        <span className="font-medium text-red-400">Ataque </span>
-                        <span className="font-bold">{attack}</span>
-                    </div>
-                    <input
-                        type="range" min="0" max="15" value={attack}
-                        onChange={(e) => setAttack(Number(e.target.value))}
-                        className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-red-500"
-                    />
+                <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Selector de IV</span>
+                    <select
+                        value={ivInputMode}
+                        onChange={(event) => setIvInputMode(event.target.value as typeof ivInputMode)}
+                        className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-amber-400"
+                        aria-label="Tipo de selector de IV"
+                    >
+                        <option value="buttons">Selección directa</option>
+                        <option value="slider">Deslizador</option>
+                        <option value="manual">Ingresar manualmente</option>
+                    </select>
                 </div>
 
-                <div>
-                    <div className="flex justify-between text-xs mb-1">
-                        <span className="font-medium text-blue-400">Defensa </span>
-                        <span className="font-bold">{defense}</span>
-                    </div>
-                    <input
-                        type="range" min="0" max="15" value={defense}
-                        onChange={(e) => setDefense(Number(e.target.value))}
-                        className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                    />
-                </div>
+                {ivControls.map(({ label, value, setValue, labelClass, sliderClass }) => (
+                    <div key={label}>
+                        <div className="mb-1 flex items-center justify-between gap-3 text-xs">
+                            <span className={`font-medium ${labelClass}`}>{label}</span>
+                            <input
+                                type="number"
+                                min="0"
+                                max="15"
+                                step="1"
+                                value={value}
+                                onChange={(event) => {
+                                    const nextValue = Number(event.target.value);
+                                    if (Number.isInteger(nextValue) && nextValue >= 0 && nextValue <= 15) {
+                                        setValue(nextValue);
+                                    }
+                                }}
+                                className="w-14 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-right font-mono text-xs text-white outline-none focus:border-amber-400"
+                                aria-label={`IV de ${label}`}
+                            />
+                        </div>
 
-                <div>
-                    <div className="flex justify-between text-xs mb-1">
-                        <span className="font-medium text-green-400">Salud </span>
-                        <span className="font-bold">{stamina}</span>
+                        {ivInputMode === 'buttons' && (
+                            <div className="grid grid-cols-8 gap-0 sm:grid-cols-16">
+                                {Array.from({ length: 16 }, (_, iv) => (
+                                    <button
+                                        key={iv}
+                                        type="button"
+                                        onClick={() => setValue(iv)}
+                                        className={`rounded-md border px-1 py-4 text-xs font-semibold transition ${value === iv
+                                            ? 'border-amber-300 bg-amber-400 text-slate-950'
+                                            : 'border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-500 hover:bg-slate-700'
+                                            }`}
+                                        aria-label={`${label}: ${iv}`}
+                                        aria-pressed={value === iv}
+                                    >
+                                        {iv}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+
+                        {ivInputMode === 'slider' && (
+                            <input
+                                type="range"
+                                min="0"
+                                max="15"
+                                value={value}
+                                onChange={(event) => setValue(Number(event.target.value))}
+                                className={`w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer ${sliderClass}`}
+                                aria-label={`IV de ${label}`}
+                            />
+                        )}
+
                     </div>
-                    <input
-                        type="range" min="0" max="15" value={stamina}
-                        onChange={(e) => setStamina(Number(e.target.value))}
-                        className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-green-500"
-                    />
-                </div>
+                ))}
             </div>
 
-            <div className="mb-4 rounded-xl border border-slate-700 bg-slate-900/80 p-3">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex-1">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">Evaluación actual</p>
-                        <div className="mt-2 flex items-center gap-3 flex-wrap">
-                            <div className="rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-2">
-                                <p className="text-[9px] uppercase tracking-[0.16em] text-slate-400">IV</p>
-                                <p className="mt-1 text-lg font-bold text-slate-100">{attack}/{defense}/{stamina}</p>
-                            </div>
-                            <div className="rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-2">
-                                <p className="text-[9px] uppercase tracking-[0.16em] text-slate-400">% total</p>
-                                <p className="mt-1 text-lg font-bold text-slate-100">{percentage}%</p>
-                            </div>
-                            <div className="rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-2">
-                                <p className="text-[9px] uppercase tracking-[0.16em] text-slate-400">CP</p>
-                                <p className="mt-1 text-lg font-bold text-amber-300 font-mono">{cp > 0 ? cp : '---'}</p>
-                            </div>
+            <div className="relative mb-4 rounded-xl border border-slate-700 bg-slate-900/80 p-4 pt-5">
+                {onPinAnalysis && (
+                    <button
+                        type="button"
+                        onClick={onPinAnalysis}
+                        className="absolute right-3 top-3 rounded-lg border border-amber-400/60 px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-amber-300 transition hover:bg-amber-400 hover:text-slate-950"
+                        title="Fijar análisis"
+                    >
+                        <span aria-hidden="true">📌</span> Fijar
+                    </button>
+                )}
+                <div className="text-center">
+                    <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-300">Evaluación actual</p>
+                    <div className="mt-3 flex items-center justify-center gap-2 sm:gap-3">
+                        <div className="rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-2">
+                            <p className="text-[9px] uppercase tracking-[0.16em] text-slate-400">IV</p>
+                            <p className="mt-1 text-lg font-bold text-slate-100">{attack}/{defense}/{stamina}</p>
+                        </div>
+                        <div className="rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-2">
+                            <p className="text-[9px] uppercase tracking-[0.16em] text-slate-400">% total</p>
+                            <p className="mt-1 text-lg font-bold text-slate-100">{percentage}%</p>
+                        </div>
+                        <div className="rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-2">
+                            <p className="text-[9px] uppercase tracking-[0.16em] text-slate-400">Nivel</p>
+                            <p className="mt-1 text-lg font-bold text-amber-300 font-mono">{level}</p>
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-2 text-left sm:min-w-[320px]">
+                    <div className="mt-4 grid grid-cols-3 gap-2 text-center">
                         {[
-                            { label: 'Great', rank: currentRankGreat, total: totalGreat },
-                            { label: 'Ultra', rank: currentRankUltra, total: totalUltra },
-                            { label: 'Master', rank: currentRankMaster, total: totalMaster },
-                        ].map(({ label, rank, total }) => (
-                            <div key={label} className="rounded-lg border border-slate-700 bg-slate-800/80 px-2 py-1.5 text-center">
-                                <p className="text-[9px] uppercase tracking-[0.18em] text-slate-400">{label}</p>
-                                <p className="mt-1 text-lg font-black text-slate-100">
+                            {
+                                label: 'Great',
+                                rank: currentRankGreat,
+                                total: totalGreat,
+                                icon: '/assets/leagues/pogo_great_league.webp',
+                                exceedsLimit: cp > 1500,
+                                limit: 1500,
+                            },
+                            {
+                                label: 'Ultra',
+                                rank: currentRankUltra,
+                                total: totalUltra,
+                                icon: '/assets/leagues/pogo_ultra_league.webp',
+                                exceedsLimit: cp > 2500,
+                                limit: 2500,
+                            },
+                            {
+                                label: 'Master',
+                                rank: currentRankMaster,
+                                total: totalMaster,
+                                icon: '/assets/leagues/pogo_master_league.webp',
+                                exceedsLimit: false,
+                                limit: null,
+                            },
+                        ].map(({ label, rank, total, icon, exceedsLimit, limit }) => (
+                            <div
+                                key={label}
+                                className={`rounded-lg border px-2 py-2.5 text-center ${getRankCardStyle(rank, exceedsLimit)}`}
+                                title={exceedsLimit ? `Excede el límite de ${limit} PC en el nivel seleccionado` : `${label} League`}
+                            >
+                                <div className="flex items-center justify-center gap-1">
+                                    <img src={icon} alt={`${label} League`} className="h-7 w-7 object-contain" />
+                                    <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-200">{label}</span>
+                                </div>
+                                <p className="mt-1 text-xl font-black text-slate-100">
                                     {rank ? `#${rank}` : 'N/A'}
                                 </p>
-                                <p className="text-[10px] text-slate-400">de {total || '—'}</p>
+                                <p className="text-[11px] text-slate-400">de {total || '—'}</p>
+                                {exceedsLimit && (
+                                    <p className="mt-1 text-[9px] font-bold uppercase tracking-wide text-red-300">Excede PC</p>
+                                )}
                             </div>
                         ))}
                     </div>

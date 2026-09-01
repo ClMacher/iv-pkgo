@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import SearchBar from './components/search-bar/search-bar';
 import IvCalculator from './components/iv-calculator/iv-calculator';
+import type { IvValues } from './components/iv-calculator/iv-calculator';
+import PinnedAnalyses, { type PinnedAnalysis } from './components/pinned-analyses/pinned-analyses';
 import PokemonSprite from './components/pokemon-sprite/pokemon-sprite';
 import { getBaseStats, specialForm, pokemonTypes } from './services/poke-api';
 import { typeGradient, MEGA_GRADIENT } from './services/type-colors';
@@ -17,6 +19,7 @@ interface HistoryItem {
 }
 
 const HISTORY_KEY = 'poke_iv_history';
+const PINNED_KEY = 'poke_iv_pinned_analyses';
 
 /** Único rastro que queda de la forma: un tinte en el borde de la tarjeta. */
 const FORM_COLOR = {
@@ -101,6 +104,8 @@ function migrateHistory(stored: any): HistoryItem[] {
 export default function App() {
   const [selectedPokemon, setSelectedPokemon] = useState<any | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [ivValues, setIvValues] = useState<IvValues>({ attack: 15, defense: 15, stamina: 15, level: 20 });
+  const [pinnedAnalyses, setPinnedAnalyses] = useState<PinnedAnalysis[]>([]);
 
   useEffect(() => {
     const savedHistory = localStorage.getItem(HISTORY_KEY);
@@ -110,6 +115,18 @@ export default function App() {
     } catch (e) {
       console.warn('Historial ilegible, se descarta.', e);
       localStorage.removeItem(HISTORY_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    const savedPinned = localStorage.getItem(PINNED_KEY);
+    if (!savedPinned) return;
+    try {
+      const parsed = JSON.parse(savedPinned);
+      if (Array.isArray(parsed)) setPinnedAnalyses(parsed);
+    } catch (e) {
+      console.warn('Análisis fijados ilegibles, se descartan.', e);
+      localStorage.removeItem(PINNED_KEY);
     }
   }, []);
 
@@ -130,6 +147,33 @@ export default function App() {
       const updatedHistory = [newItem, ...filtered].slice(0, 5);
       localStorage.setItem(HISTORY_KEY, JSON.stringify(updatedHistory));
       return updatedHistory;
+    });
+  };
+
+  const handlePinAnalysis = () => {
+    if (!selectedPokemon) return;
+
+    const id = `${speciesKey(selectedPokemon)}:${ivValues.attack}-${ivValues.defense}-${ivValues.stamina}:${ivValues.level}`;
+    setPinnedAnalyses((previous) => {
+      const updated = [
+        { id, pokemon: selectedPokemon, ivValues },
+        ...previous.filter((analysis) => analysis.id !== id),
+      ].slice(0, 8);
+      localStorage.setItem(PINNED_KEY, JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const handleSelectPinnedAnalysis = (analysis: PinnedAnalysis) => {
+    setSelectedPokemon(analysis.pokemon);
+    setIvValues(analysis.ivValues);
+  };
+
+  const handleRemovePinnedAnalysis = (id: string) => {
+    setPinnedAnalyses((previous) => {
+      const updated = previous.filter((analysis) => analysis.id !== id);
+      localStorage.setItem(PINNED_KEY, JSON.stringify(updated));
+      return updated;
     });
   };
 
@@ -179,6 +223,21 @@ export default function App() {
             onSelectPokemon={handleSelectPokemon}
             history={history}
             selectedPokemonId={selectedKey}
+            onClearHistory={() => {
+              setHistory([]);
+              localStorage.removeItem(HISTORY_KEY);
+            }}
+          />
+
+          <PinnedAnalyses
+            analyses={pinnedAnalyses}
+            activeId={selectedPokemon ? `${selectedKey}:${ivValues.attack}-${ivValues.defense}-${ivValues.stamina}:${ivValues.level}` : undefined}
+            onSelect={handleSelectPinnedAnalysis}
+            onRemove={handleRemovePinnedAnalysis}
+            onRemoveAll={() => {
+              setPinnedAnalyses([]);
+              localStorage.removeItem(PINNED_KEY);
+            }}
           />
 
           {/* Sin Pokémon elegido no hay tarjeta, y la calculadora ocupa todo. */}
@@ -289,7 +348,13 @@ export default function App() {
               </div>
             )}
 
-            <IvCalculator baseStats={baseStats} pokemon={selectedPokemon} />
+            <IvCalculator
+              baseStats={baseStats}
+              pokemon={selectedPokemon}
+              ivValues={ivValues}
+              onIvValuesChange={setIvValues}
+              onPinAnalysis={handlePinAnalysis}
+            />
           </div>
         </div>
       </div>
