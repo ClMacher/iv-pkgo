@@ -1,5 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { fetchCpMultipliers, fetchPrecomputedRanking } from '../../services/poke-api';
+import IvRanking from '../iv-ranking/iv-ranking';
+import type { League, RankedCombo } from '../iv-ranking/iv-ranking';
+import IvSelector from '../iv-selector/iv-selector';
+import type { IvInputMode } from '../iv-selector/iv-selector';
 
 export interface IvValues {
     attack: number;
@@ -119,618 +123,428 @@ const CPM_TABLE: Record<number, number> = {
     50: 0.84029999
 };
 
+const EMPTY_RANKINGS: Record<League, RankedCombo[]> = { great: [], ultra: [], master: [] };
+
+const LEAGUE_DEFS = [
+    { id: 'great' as League, label: 'Great', icon: '/assets/leagues/pogo_great_league.webp', cap: 1500 },
+    { id: 'ultra' as League, label: 'Ultra', icon: '/assets/leagues/pogo_ultra_league.webp', cap: 2500 },
+    { id: 'master' as League, label: 'Master', icon: '/assets/leagues/pogo_master_league.webp', cap: null },
+];
+
+/**
+ * Fórmula canónica de PC, la misma que usa PvPoke:
+ * floor(atk * sqrt(def) * sqrt(hp) * cpm² / 10), con un suelo de 10.
+ */
+function computeCpWithCpm(
+    baseAtk: number,
+    baseDef: number,
+    baseHp: number,
+    atkIv: number,
+    defIv: number,
+    hpIv: number,
+    cpm: number,
+) {
+    const cp = Math.floor(
+        ((baseAtk + atkIv) * Math.sqrt(baseDef + defIv) * Math.sqrt(baseHp + hpIv) * cpm ** 2) / 10,
+    );
+    return Math.max(10, cp);
+}
+
+/**
+ * Normaliza el ranking que devuelve el servicio, que llega en tres formatos
+ * según de dónde salga: `all` en los archivos precalculados, `top` en los que
+ * se generan al vuelo y `map` en los del esquema viejo, que hay que reordenar
+ * por posición porque un objeto no garantiza el orden de sus claves.
+ *
+ * Sale ordenado por posición, así que el índice de la lista ES la posición y no
+ * hace falta arrastrar el `map` en paralelo para consultarla.
+ */
+function parseFullRanking(data: any): RankedCombo[] {
+    const source = Array.isArray(data?.all) ? data.all : Array.isArray(data?.top) ? data.top : null;
+
+    if (source) {
+        return source.map((it: any) => ({
+            atk: Number(it.atk),
+            def: Number(it.def),
+            hp: Number(it.hp),
+            cp: Number(it.cp),
+            sum: Number(it.sum),
+            bestLevel: Number(it.lvl ?? it.bestLevel ?? 0),
+            statProduct: Number(it.statProduct ?? it.product ?? 0),
+            pct: Number(it.pct ?? 0),
+        }));
+    }
+
+    if (!data?.map || typeof data.map !== 'object') return [];
+
+    return Object.entries(data.map)
+        .map(([key, value]: [string, any]) => {
+            const [atk, def, hp] = key.split('-').map(Number);
+            return {
+                rank: Number(value?.rank ?? 0),
+                atk,
+                def,
+                hp,
+                cp: Number(value?.cp ?? 0),
+                sum: atk + def + hp,
+                bestLevel: Number(value?.lvl ?? value?.bestLevel ?? 0),
+                statProduct: Number(value?.statProduct ?? value?.product ?? 0),
+                pct: Number(value?.pct ?? 0),
+            };
+        })
+        .sort((a, b) => a.rank - b.rank)
+        .map(({ rank: _rank, ...combo }) => combo);
+}
+
 export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesChange, onPinAnalysis }: IvCalculatorProps) {
     const { attack, defense, stamina, level } = ivValues;
     const setAttack = (value: number) => onIvValuesChange({ ...ivValues, attack: value });
     const setDefense = (value: number) => onIvValuesChange({ ...ivValues, defense: value });
     const setStamina = (value: number) => onIvValuesChange({ ...ivValues, stamina: value });
     const setLevel = (value: number) => onIvValuesChange({ ...ivValues, level: value });
-    const [ivInputMode, setIvInputMode] = useState<'buttons' | 'slider' | 'manual'>('buttons');
+
+    const [ivInputMode, setIvInputMode] = useState<IvInputMode>('buttons');
     const [cp, setCp] = useState<number>(0);
     const [cpMultipliers, setCpMultipliers] = useState<Record<number, number> | null>(null);
+    const [rankingLists, setRankingLists] = useState<Record<League, RankedCombo[]>>(EMPTY_RANKINGS);
 
-    // Estados para simulación PvP
-    const [greatLeagueCp, setGreatLeagueCp] = useState<number>(0);
-    const [ultraLeagueCp, setUltraLeagueCp] = useState<number>(0);
+    /** Mejor PC alcanzable sin pasarse del tope de cada liga. */
+    const [bestCpByLeague, setBestCpByLeague] = useState<Record<League, number>>({ great: 0, ultra: 0, master: 0 });
 
     const totalIv = attack + defense + stamina;
     const percentage = ((totalIv / 45) * 100).toFixed(1);
 
-    // Helper: obtener CPM local (prefiere valores cargados desde pogoapi)
-    const getCpmLocal = (lvl: number) => {
-        if (cpMultipliers && cpMultipliers[lvl]) return cpMultipliers[lvl];
-        return CPM_TABLE[lvl] || 0.79030001;
-    };
+    // App rehace `baseStats` en cada render, así que los efectos dependen de los
+    // tres números y no de la referencia: con el objeto en las dependencias el
+    // ranking se volvía a pedir y a parsear en cada pulsación.
+    const baseAtk = baseStats?.atk;
+    const baseDef = baseStats?.def;
+    const baseHp = baseStats?.hp;
+    const speciesId = pokemon?.speciesId;
 
-    // Fórmula canónica usada por muchas referencias (PvPoke):
-    // CP = floor(((baseAtk+atkIv) * sqrt(baseDef+defIv) * sqrt(baseHp+hpIv) * (cpm ** 2)) / 10)
-    const computeCpWithCpm = (baseAtk: number, baseDef: number, baseHp: number, atkIv: number, defIv: number, hpIv: number, cpm: number) => {
-        const atk = baseAtk + atkIv;
-        const def = baseDef + defIv;
-        const hp = baseHp + hpIv;
-        const cp = Math.floor((atk * Math.sqrt(def) * Math.sqrt(hp) * (cpm ** 2)) / 10);
-        return Math.max(10, cp);
-    };
-
-    type RankedCombo = {
-        atk: number;
-        def: number;
-        hp: number;
-        cp: number;
-        sum: number;
-        bestLevel: number;
-        statProduct: number;
-        pct: number;
-    };
-
-    // Calcular ranking de todos los IVs (0-15) para el nivel y pokemon actuales
-    const [topGreatIvs, setTopGreatIvs] = useState<RankedCombo[]>([]);
-    const [topUltraIvs, setTopUltraIvs] = useState<RankedCombo[]>([]);
-    const [topMasterIvs, setTopMasterIvs] = useState<RankedCombo[]>([]);
-    const [currentRankGreat, setCurrentRankGreat] = useState<number | null>(null);
-    const [currentRankUltra, setCurrentRankUltra] = useState<number | null>(null);
-    const [currentRankMaster, setCurrentRankMaster] = useState<number | null>(null);
-    const [suggestedLevel, setSuggestedLevel] = useState<number | null>(null);
-    const [suggestedCp, setSuggestedCp] = useState<number | null>(null);
-    const [totalGreat, setTotalGreat] = useState<number>(0);
-    const [totalUltra, setTotalUltra] = useState<number>(0);
-    const [totalMaster, setTotalMaster] = useState<number>(0);
-    const [selectedLeague, setSelectedLeague] = useState<'great' | 'ultra' | 'master'>('great');
-    const [selectedTop, setSelectedTop] = useState<number | 'all'>(50);
-    const rankingOptions: Array<number | 'all'> = [10, 50, 100, 500, 'all'];
-
-    const getVisibleRankingSlice = (list: RankedCombo[]) => {
-        if (selectedTop === 'all') return list;
-        const limit = Math.min(Number(selectedTop), list.length);
-        return list.slice(0, limit);
-    };
-
+    // Cargar los CPM exactos de pogoapi.net una sola vez.
     useEffect(() => {
-        if (!baseStats) {
-            setTopGreatIvs([]);
-            setTopUltraIvs([]);
-            setTopMasterIvs([]);
-            setCurrentRankGreat(null);
-            setCurrentRankUltra(null);
-            setCurrentRankMaster(null);
-            setSuggestedLevel(null);
-            setSuggestedCp(null);
+        let mounted = true;
+        fetchCpMultipliers()
+            .then((map) => {
+                if (mounted && map && Object.keys(map).length > 0) setCpMultipliers(map);
+            })
+            .catch(() => { });
+        return () => {
+            mounted = false;
+        };
+    }, []);
+
+    // El ranking depende de la especie, no de los IV elegidos: se pide una vez
+    // por Pokémon y la posición actual se busca después sobre la lista ya cargada.
+    useEffect(() => {
+        if (!speciesId || baseAtk === undefined) {
+            setRankingLists(EMPTY_RANKINGS);
             return;
         }
 
-        const applyPrecomputedRanking = async () => {
-            if (!pokemon || !pokemon.speciesId) {
-                return;
-            }
+        let cancelado = false;
 
-            const requestedTop = 4096;
-
+        (async () => {
             try {
-                const [greatRanking, ultraRanking, masterRanking] = await Promise.all([
-                    fetchPrecomputedRanking(pokemon.speciesId, 1500, { top: requestedTop }),
-                    fetchPrecomputedRanking(pokemon.speciesId, 2500, { top: requestedTop }),
-                    fetchPrecomputedRanking(pokemon.speciesId, 'master', { top: requestedTop }),
+                const requestedTop = 4096;
+                const [great, ultra, master] = await Promise.all([
+                    fetchPrecomputedRanking(speciesId, 1500, { top: requestedTop }),
+                    fetchPrecomputedRanking(speciesId, 2500, { top: requestedTop }),
+                    fetchPrecomputedRanking(speciesId, 'master', { top: requestedTop }),
                 ]);
 
-                const parseFullRanking = (data: any) => {
-                    const source = Array.isArray(data?.all)
-                        ? data.all
-                        : Array.isArray(data?.top)
-                            ? data.top
-                            : [];
-                    if (Array.isArray(source) && source.length > 0) {
-                        return source.map((it: any) => ({
-                            atk: Number(it.atk),
-                            def: Number(it.def),
-                            hp: Number(it.hp),
-                            cp: Number(it.cp),
-                            sum: Number(it.sum),
-                            bestLevel: Number(it.lvl ?? it.bestLevel ?? 0),
-                            statProduct: Number(it.statProduct ?? it.product ?? 0),
-                            pct: Number(it.pct ?? 0),
-                        }));
-                    }
+                // Cambiar de Pokémon mientras se descarga no debe pisar la lista
+                // nueva con la que venía en camino.
+                if (cancelado) return;
 
-                    if (!data?.map || typeof data.map !== 'object') {
-                        return [];
-                    }
-
-                    return Object.entries(data.map)
-                        .map(([key, value]: [string, any]) => {
-                            const [atk, def, hp] = key.split('-').map(Number);
-                            return {
-                                atk,
-                                def,
-                                hp,
-                                cp: Number(value?.cp ?? 0),
-                                sum: atk + def + hp,
-                                bestLevel: Number(value?.lvl ?? value?.bestLevel ?? 0),
-                                statProduct: Number(value?.statProduct ?? value?.product ?? 0),
-                                pct: Number(value?.pct ?? 0),
-                                rank: Number(value?.rank ?? 0),
-                            };
-                        })
-                        .sort((a, b) => a.rank - b.rank)
-                        .map(({ rank, ...it }) => it);
-                };
-
-                const greatList = parseFullRanking(greatRanking);
-                const ultraList = parseFullRanking(ultraRanking);
-                const masterList = parseFullRanking(masterRanking);
-
-                if (greatList.length > 0 || ultraList.length > 0 || masterList.length > 0) {
-                    setTopGreatIvs(greatList);
-                    setTopUltraIvs(ultraList);
-                    setTopMasterIvs(masterList);
-                    setTotalGreat(greatRanking?.meta?.total ?? greatList.length);
-                    setTotalUltra(ultraRanking?.meta?.total ?? ultraList.length);
-                    setTotalMaster(masterRanking?.meta?.total ?? masterList.length);
-
-                    const rankFromMap = (data: any, atk: number, def: number, hp: number) => {
-                        const key = `${atk}-${def}-${hp}`;
-                        return data?.map?.[key]?.rank ?? null;
-                    };
-
-                    setCurrentRankGreat(rankFromMap(greatRanking, attack, defense, stamina));
-                    setCurrentRankUltra(rankFromMap(ultraRanking, attack, defense, stamina));
-                    setCurrentRankMaster(rankFromMap(masterRanking, attack, defense, stamina));
-
-                    const currentKey = `${attack}-${defense}-${stamina}`;
-                    const suggestedGreat = greatRanking?.map?.[currentKey]?.lvl ?? null;
-                    const suggestedUltra = ultraRanking?.map?.[currentKey]?.lvl ?? null;
-                    const suggestedMaster = masterRanking?.map?.[currentKey]?.lvl ?? null;
-                    const suggestedRank = suggestedGreat ?? suggestedUltra ?? suggestedMaster ?? null;
-                    const suggestedCpValue =
-                        greatRanking?.map?.[currentKey]?.cp ??
-                        ultraRanking?.map?.[currentKey]?.cp ??
-                        masterRanking?.map?.[currentKey]?.cp ??
-                        null;
-
-                    setSuggestedLevel(suggestedRank);
-                    setSuggestedCp(suggestedCpValue);
-                    return;
-                }
+                setRankingLists({
+                    great: parseFullRanking(great),
+                    ultra: parseFullRanking(ultra),
+                    master: parseFullRanking(master),
+                });
             } catch (e) {
-                console.warn('Failed to load precomputed ranking, falling back to local ranking', e);
+                console.warn('No se pudo cargar el ranking precalculado', e);
+                if (!cancelado) setRankingLists(EMPTY_RANKINGS);
             }
+        })();
 
-            // Fallback local ranking generation
-            const levels = (cpMultipliers ? Object.keys(cpMultipliers).map(Number) : Object.keys(CPM_TABLE).map(Number)).sort((a, b) => a - b);
-            const list: RankedCombo[] = [];
-            for (let a = 0; a <= 15; a++) {
-                for (let d = 0; d <= 15; d++) {
-                    for (let s = 0; s <= 15; s++) {
-                        let bestCp = 10;
-                        let bestLvl = levels[0] ?? 1;
-                        let bestStatProduct = 0;
-                        for (const lvl of levels) {
-                            const simCpm = getCpmLocal(lvl);
-                            if (!simCpm) continue;
-                            const simCp = computeCpWithCpm(baseStats.atk, baseStats.def, baseStats.hp, a, d, s, simCpm);
-                            const statProduct = ((baseStats.atk + a) * simCpm) * ((baseStats.def + d) * simCpm) * Math.floor((baseStats.hp + s) * simCpm);
-                            if (simCp > bestCp || (simCp === bestCp && statProduct > bestStatProduct)) {
-                                bestCp = simCp;
-                                bestLvl = lvl;
-                                bestStatProduct = statProduct;
-                            }
-                        }
-                        list.push({
-                            atk: a,
-                            def: d,
-                            hp: s,
-                            cp: bestCp,
-                            sum: a + d + s,
-                            bestLevel: bestLvl,
-                            statProduct: bestStatProduct,
-                            pct: 100,
-                        });
-                    }
-                }
-            }
-
-            list.sort((x, y) => {
-                if (y.statProduct !== x.statProduct) return y.statProduct - x.statProduct;
-                if (y.cp !== x.cp) return y.cp - x.cp;
-                if (y.sum !== x.sum) return y.sum - x.sum;
-                if (y.atk !== x.atk) return y.atk - x.atk;
-                return y.def - x.def;
-            });
-
-            const masterList = list;
-            const ultraList = masterList.filter(item => item.cp <= 2500);
-            const greatList = masterList.filter(item => item.cp <= 1500);
-
-            setTopMasterIvs(masterList);
-            setTopUltraIvs(ultraList);
-            setTopGreatIvs(greatList);
-
-            setTotalMaster(masterList.length);
-            setTotalUltra(ultraList.length);
-            setTotalGreat(greatList.length);
-
-            const masterIdx = masterList.findIndex(item => item.atk === attack && item.def === defense && item.hp === stamina);
-            setCurrentRankMaster(masterIdx >= 0 ? masterIdx + 1 : null);
-
-            const ultraIdx = ultraList.findIndex(item => item.atk === attack && item.def === defense && item.hp === stamina);
-            setCurrentRankUltra(ultraIdx >= 0 ? ultraIdx + 1 : null);
-
-            const greatIdx = greatList.findIndex(item => item.atk === attack && item.def === defense && item.hp === stamina);
-            setCurrentRankGreat(greatIdx >= 0 ? greatIdx + 1 : null);
-
-            if (masterIdx >= 0) {
-                const combo = masterList[masterIdx];
-                setSuggestedLevel(combo.bestLevel || null);
-                setSuggestedCp(combo.cp || null);
-            } else {
-                setSuggestedLevel(null);
-                setSuggestedCp(null);
-            }
+        return () => {
+            cancelado = true;
         };
+    }, [speciesId, baseAtk, baseDef, baseHp]);
 
-        applyPrecomputedRanking();
-    }, [baseStats, pokemon, level, attack, defense, stamina, cpMultipliers, selectedTop]);
-
+    // PC del nivel elegido y mejor PC por liga.
     useEffect(() => {
-        if (baseStats) {
-            // baseStats y IVs se usan directamente en los cálculos siguientes
-
-            // 1. Calcular PC del nivel manual actual usando la fórmula exacta y el CPM cargado
-            const cpm = getCpmLocal(level);
-            const calculatedCp = computeCpWithCpm(baseStats.atk, baseStats.def, baseStats.hp, attack, defense, stamina, cpm);
-            setCp(calculatedCp);
-
-            // 2. Simulación PvP: Buscar nivel óptimo para Liga Super (Límite 1500) y Ultra (Límite 2500)
-            let bestGreatCp = 10;
-            let bestUltraCp = 10;
-
-            const levels = (cpMultipliers ? Object.keys(cpMultipliers).map(Number) : Object.keys(CPM_TABLE).map(Number)).sort((a, b) => a - b);
-            levels.forEach((lvl) => {
-                const simCpm = getCpmLocal(lvl);
-                if (!simCpm) return;
-                const simCp = computeCpWithCpm(baseStats.atk, baseStats.def, baseStats.hp, attack, defense, stamina, simCpm);
-
-                if (simCp <= 1500 && simCp > bestGreatCp) bestGreatCp = simCp;
-                if (simCp <= 2500 && simCp > bestUltraCp) bestUltraCp = simCp;
-            });
-
-            setGreatLeagueCp(bestGreatCp);
-            setUltraLeagueCp(bestUltraCp);
-        } else {
+        if (baseAtk === undefined || baseDef === undefined || baseHp === undefined) {
             setCp(0);
-            setGreatLeagueCp(0);
-            setUltraLeagueCp(0);
+            setBestCpByLeague({ great: 0, ultra: 0, master: 0 });
+            return;
         }
-    }, [attack, defense, stamina, level, baseStats, cpMultipliers]);
 
-    // Cargar CPM exactos desde pogoapi.net una vez
-    useEffect(() => {
-        let mounted = true;
-        fetchCpMultipliers().then((map) => {
-            if (mounted && map && Object.keys(map).length > 0) setCpMultipliers(map);
-        }).catch(() => { });
-        return () => { mounted = false; };
-    }, []);
+        // Definido dentro del efecto y no fuera: así la única dependencia real
+        // es `cpMultipliers`, que ya está en la lista.
+        const cpmDe = (lvl: number) => cpMultipliers?.[lvl] ?? CPM_TABLE[lvl] ?? 0.79030001;
 
-    // (sin funciones auxiliares no usadas)
+        setCp(computeCpWithCpm(baseAtk, baseDef, baseHp, attack, defense, stamina, cpmDe(level)));
 
-    const getIvColor = (pct: number) => {
-        if (pct === 100) return 'text-amber-500 font-bold animate-pulse';
-        if (pct >= 82.2) return 'text-green-500';
-        if (pct >= 64.4) return 'text-blue-500';
-        return 'text-gray-400';
-    };
+        const levels = Object.keys(cpMultipliers ?? CPM_TABLE)
+            .map(Number)
+            .sort((a, b) => a - b);
+
+        const mejores = { great: 0, ultra: 0, master: 0 };
+        levels.forEach((lvl) => {
+            const simCpm = cpmDe(lvl);
+            if (!simCpm) return;
+            const simCp = computeCpWithCpm(baseAtk, baseDef, baseHp, attack, defense, stamina, simCpm);
+            if (simCp <= 1500 && simCp > mejores.great) mejores.great = simCp;
+            if (simCp <= 2500 && simCp > mejores.ultra) mejores.ultra = simCp;
+            if (simCp > mejores.master) mejores.master = simCp;
+        });
+
+        setBestCpByLeague(mejores);
+    }, [attack, defense, stamina, level, baseAtk, baseDef, baseHp, cpMultipliers]);
+
+    const leagueCards = useMemo(
+        () =>
+            LEAGUE_DEFS.map((liga) => {
+                const lista = rankingLists[liga.id];
+                // La lista viene ordenada por posición, así que el índice basta.
+                const idx = lista.findIndex(
+                    (it) => it.atk === attack && it.def === defense && it.hp === stamina,
+                );
+                return {
+                    ...liga,
+                    rank: idx >= 0 ? idx + 1 : null,
+                    total: lista.length,
+                    bestCp: bestCpByLeague[liga.id],
+                    exceedsLimit: liga.cap !== null && cp > liga.cap,
+                };
+            }),
+        [rankingLists, bestCpByLeague, cp, attack, defense, stamina],
+    );
 
     const getRankCardStyle = (rank: number | null, exceedsLimit: boolean) => {
-        if (exceedsLimit) {
-            return 'border-red-400/80 bg-red-950/60 ring-1 ring-red-400/40';
-        }
-        if (rank === 1) {
-            return 'border-amber-300/80 bg-amber-950/50 ring-1 ring-amber-300/40';
-        }
-        if (rank !== null && rank <= 10) {
-            return 'border-emerald-400/70 bg-emerald-950/40 ring-1 ring-emerald-400/30';
-        }
-        if (rank !== null && rank <= 200) {
-            return 'border-blue-400/70 bg-blue-950/40 ring-1 ring-blue-400/30';
-        }
-        return 'border-slate-700 bg-slate-800/80';
+        if (exceedsLimit) return 'border-red-400/60 bg-red-950/40';
+        if (rank === 1) return 'border-amber-300/70 bg-amber-950/40';
+        if (rank !== null && rank <= 10) return 'border-emerald-400/60 bg-emerald-950/30';
+        if (rank !== null && rank <= 200) return 'border-blue-400/60 bg-blue-950/30';
+        return 'border-slate-800 bg-slate-950/50';
     };
 
     const ivControls = [
-        { label: 'Ataque', value: attack, setValue: setAttack, labelClass: 'text-red-400', sliderClass: 'accent-red-500' },
-        { label: 'Defensa', value: defense, setValue: setDefense, labelClass: 'text-blue-400', sliderClass: 'accent-blue-500' },
-        { label: 'Salud', value: stamina, setValue: setStamina, labelClass: 'text-green-400', sliderClass: 'accent-green-500' },
+        {
+            label: 'Ataque',
+            value: attack,
+            setValue: setAttack,
+            labelClass: 'text-red-400',
+            selectedClass: 'bg-red-500 text-white shadow-md shadow-red-500/30',
+            trailClass: 'bg-red-500/25 text-red-100',
+            sliderClass: 'accent-red-500',
+        },
+        {
+            label: 'Defensa',
+            value: defense,
+            setValue: setDefense,
+            labelClass: 'text-blue-400',
+            selectedClass: 'bg-blue-500 text-white shadow-md shadow-blue-500/30',
+            trailClass: 'bg-blue-500/25 text-blue-100',
+            sliderClass: 'accent-blue-500',
+        },
+        {
+            label: 'Salud',
+            value: stamina,
+            setValue: setStamina,
+            labelClass: 'text-green-400',
+            selectedClass: 'bg-emerald-500 text-white shadow-md shadow-emerald-500/30',
+            trailClass: 'bg-emerald-500/25 text-emerald-100',
+            sliderClass: 'accent-green-500',
+        },
     ] as const;
 
     return (
-        <div className="bg-slate-800 text-white p-6 rounded-2xl shadow-xl border border-slate-700 space-y-6">
-            <h2 className="text-xl font-bold text-center">Calculadora de IVs y PC</h2>
+        <>
+            <section className="flex flex-col justify-between gap-5 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
+                <header className="flex items-center justify-between gap-3">
+                    <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-300">
+                        Calculadora de IVs y PC
+                    </h2>
+                    {onPinAnalysis && baseStats && (
+                        <button
+                            type="button"
+                            onClick={onPinAnalysis}
+                            className="cursor-pointer rounded-lg border border-amber-400/50 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-amber-300 transition hover:bg-amber-400 hover:text-slate-950"
+                            title="Guardar esta combinación en los análisis fijados"
+                        >
+                            <span aria-hidden="true">📌</span> Fijar
+                        </button>
+                    )}
+                </header>
 
+                {/* El resultado va arriba y a lo ancho de la tarjeta: es lo que se
+                    mira después de cada ajuste, y así el selector de IV se queda
+                    con la fila entera en vez de media columna. */}
+                <div className="flex flex-col gap-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        Evaluación actual
+                    </p>
 
-
-            {/* Selector de Nivel */}
-            <div className="bg-slate-900 p-3 rounded-xl border border-slate-800">
-                <div className="mb-1 flex items-center justify-between gap-3 text-sm">
-                    <span className="font-medium text-amber-400">Nivel del Pokémon</span>
-                    <input
-                        type="number"
-                        min="1"
-                        max="50"
-                        step="1"
-                        value={level}
-                        onChange={(event) => {
-                            const nextValue = Number(event.target.value);
-                            if (Number.isInteger(nextValue) && nextValue >= 1 && nextValue <= 50) {
-                                setLevel(nextValue);
-                            }
-                        }}
-                        className="w-16 rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-right font-mono text-sm text-white outline-none focus:border-amber-400"
-                        aria-label="Nivel del Pokémon"
-                    />
-                </div>
-                <input
-                    type="range"
-                    min="1"
-                    max="50"
-                    step="1"
-                    value={level}
-                    onChange={(e) => setLevel(Number(e.target.value))}
-                    className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-400"
-                />
-            </div>
-
-            {/* Selector y controles de IV */}
-            <div className="space-y-4">
-                <div className="flex items-center justify-between gap-3">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Selector de IV</span>
-                    <select
-                        value={ivInputMode}
-                        onChange={(event) => setIvInputMode(event.target.value as typeof ivInputMode)}
-                        className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-amber-400"
-                        aria-label="Tipo de selector de IV"
-                    >
-                        <option value="buttons">Selección directa</option>
-                        <option value="slider">Deslizador</option>
-                        <option value="manual">Ingresar manualmente</option>
-                    </select>
-                </div>
-
-                {ivControls.map(({ label, value, setValue, labelClass, sliderClass }) => (
-                    <div key={label}>
-                        <div className="mb-1 flex items-center justify-between gap-3 text-xs">
-                            <span className={`font-medium ${labelClass}`}>{label}</span>
-                            <input
-                                type="number"
-                                min="0"
-                                max="15"
-                                step="1"
-                                value={value}
-                                onChange={(event) => {
-                                    const nextValue = Number(event.target.value);
-                                    if (Number.isInteger(nextValue) && nextValue >= 0 && nextValue <= 15) {
-                                        setValue(nextValue);
-                                    }
-                                }}
-                                className="w-14 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-right font-mono text-xs text-white outline-none focus:border-amber-400"
-                                aria-label={`IV de ${label}`}
-                            />
+                    {/* Sin especie no hay stats base que combinar con los IV, así que
+                        las tarjetas saldrían todas con un guion. */}
+                    {!baseStats && (
+                        <div className="flex min-h-28 flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-slate-800 px-6 py-6 text-center">
+                            <p className="text-sm font-semibold text-slate-400">Ningún Pokémon elegido</p>
+                            <p className="max-w-md text-xs leading-relaxed text-slate-600">
+                                Búscalo por nombre o por número de Pokédex y aquí aparecerá su posición
+                                en cada liga.
+                            </p>
                         </div>
+                    )}
 
-                        {ivInputMode === 'buttons' && (
-                            <div className="grid grid-cols-8 gap-0 sm:grid-cols-16">
-                                {Array.from({ length: 16 }, (_, iv) => (
-                                    <button
-                                        key={iv}
-                                        type="button"
-                                        onClick={() => setValue(iv)}
-                                        className={`rounded-md border px-1 py-4 text-xs font-semibold transition ${value === iv
-                                            ? 'border-amber-300 bg-amber-400 text-slate-950'
-                                            : 'border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-500 hover:bg-slate-700'
-                                            }`}
-                                        aria-label={`${label}: ${iv}`}
-                                        aria-pressed={value === iv}
-                                    >
-                                        {iv}
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-
-                        {ivInputMode === 'slider' && (
-                            <input
-                                type="range"
-                                min="0"
-                                max="15"
-                                value={value}
-                                onChange={(event) => setValue(Number(event.target.value))}
-                                className={`w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer ${sliderClass}`}
-                                aria-label={`IV de ${label}`}
-                            />
-                        )}
-
-                    </div>
-                ))}
-            </div>
-
-            <div className="relative mb-4 rounded-xl border border-slate-700 bg-slate-900/80 p-4 pt-5">
-                {onPinAnalysis && (
-                    <button
-                        type="button"
-                        onClick={onPinAnalysis}
-                        className="absolute right-3 top-3 rounded-lg border border-amber-400/60 px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-amber-300 transition hover:bg-amber-400 hover:text-slate-950"
-                        title="Fijar análisis"
-                    >
-                        <span aria-hidden="true">📌</span> Fijar
-                    </button>
-                )}
-                <div className="text-center">
-                    <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-300">Evaluación actual</p>
-                    <div className="mt-3 flex items-center justify-center gap-2 sm:gap-3">
-                        <div className="rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-2">
-                            <p className="text-[9px] uppercase tracking-[0.16em] text-slate-400">IV</p>
-                            <p className="mt-1 text-lg font-bold text-slate-100">{attack}/{defense}/{stamina}</p>
-                        </div>
-                        <div className="rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-2">
-                            <p className="text-[9px] uppercase tracking-[0.16em] text-slate-400">% total</p>
-                            <p className="mt-1 text-lg font-bold text-slate-100">{percentage}%</p>
-                        </div>
-                        <div className="rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-2">
-                            <p className="text-[9px] uppercase tracking-[0.16em] text-slate-400">Nivel</p>
-                            <p className="mt-1 text-lg font-bold text-amber-300 font-mono">{level}</p>
-                        </div>
-                    </div>
-
-                    <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-                        {[
-                            {
-                                label: 'Great',
-                                rank: currentRankGreat,
-                                total: totalGreat,
-                                icon: '/assets/leagues/pogo_great_league.webp',
-                                exceedsLimit: cp > 1500,
-                                limit: 1500,
-                            },
-                            {
-                                label: 'Ultra',
-                                rank: currentRankUltra,
-                                total: totalUltra,
-                                icon: '/assets/leagues/pogo_ultra_league.webp',
-                                exceedsLimit: cp > 2500,
-                                limit: 2500,
-                            },
-                            {
-                                label: 'Master',
-                                rank: currentRankMaster,
-                                total: totalMaster,
-                                icon: '/assets/leagues/pogo_master_league.webp',
-                                exceedsLimit: false,
-                                limit: null,
-                            },
-                        ].map(({ label, rank, total, icon, exceedsLimit, limit }) => (
-                            <div
-                                key={label}
-                                className={`rounded-lg border px-2 py-2.5 text-center ${getRankCardStyle(rank, exceedsLimit)}`}
-                                title={exceedsLimit ? `Excede el límite de ${limit} PC en el nivel seleccionado` : `${label} League`}
-                            >
-                                <div className="flex items-center justify-center gap-1">
-                                    <img src={icon} alt={`${label} League`} className="h-7 w-7 object-contain" />
-                                    <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-200">{label}</span>
+                    {baseStats && (
+                        <>
+                            <div className="flex flex-wrap items-stretch gap-3">
+                                <div className="grid min-w-60 flex-1 grid-cols-2 gap-2 sm:grid-cols-4">
+                                    {[
+                                        { label: 'IV', value: `${attack}/${defense}/${stamina}`, className: 'text-slate-100' },
+                                        { label: '% total', value: `${percentage}%`, className: totalIv === 45 ? 'text-amber-300' : 'text-slate-100' },
+                                        { label: 'PC', value: cp > 10 ? String(cp) : '—', className: 'text-slate-100' },
+                                        { label: 'Nivel', value: String(level), className: 'text-amber-300' },
+                                    ].map(({ label, value, className }) => (
+                                        <div
+                                            key={label}
+                                            className="flex flex-col justify-center rounded-xl border border-slate-800 bg-slate-950/50 px-2 py-3 text-center"
+                                        >
+                                            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">{label}</p>
+                                            <p className={`mt-1 font-mono text-base font-bold tabular-nums ${className}`}>{value}</p>
+                                        </div>
+                                    ))}
                                 </div>
-                                <p className="mt-1 text-xl font-black text-slate-100">
-                                    {rank ? `#${rank}` : 'N/A'}
-                                </p>
-                                <p className="text-[11px] text-slate-400">de {total || '—'}</p>
-                                {exceedsLimit && (
-                                    <p className="mt-1 text-[9px] font-bold uppercase tracking-wide text-red-300">Excede PC</p>
-                                )}
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            </div>
 
-            {/* SECCIÓN NUEVA: Viabilidad PvP */}
-            {baseStats && (
-                <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 text-center border-b border-slate-800 pb-2">
-                        Estimación de Límites para PvP
-                    </h3>
-                    <div className="grid grid-cols-2 gap-4 text-center">
-                        <div>
-                            <div className="mb-1 flex items-center justify-center gap-1.5 text-[10px] text-slate-400 uppercase">
-                                <img src="/assets/leagues/pogo_great_league.webp" alt="Great League" className="h-4 w-4 object-contain" />
-                                <span>Great</span>
-                            </div>
-                            <p className={`text-xl font-bold font-mono ${greatLeagueCp > 1480 ? 'text-emerald-400' : 'text-slate-300'}`}>
-                                {greatLeagueCp > 10 ? `${greatLeagueCp} PC` : 'N/A'}
-                            </p>
-                        </div>
-                        <div>
-                            <div className="mb-1 flex items-center justify-center gap-1.5 text-[10px] text-slate-400 uppercase">
-                                <img src="/assets/leagues/pogo_ultra_league.webp" alt="Ultra League" className="h-4 w-4 object-contain" />
-                                <span>Ultra</span>
-                            </div>
-                            <p className={`text-xl font-bold font-mono ${ultraLeagueCp > 2470 ? 'text-emerald-400' : 'text-slate-300'}`}>
-                                {ultraLeagueCp > 10 ? `${ultraLeagueCp} PC` : 'N/A'}
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Tabla de rankings con posición destacada */}
-            {baseStats && (
-                <div className="rounded-2xl border border-slate-700 bg-slate-950/70 p-4 shadow-inner shadow-slate-950/40">
-                    <div className="mb-4 flex gap-2 justify-center flex-wrap">
-                        <button onClick={() => setSelectedLeague('great')} className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-[0.18em] ${selectedLeague === 'great' ? 'bg-amber-400 text-black' : 'bg-slate-800 text-slate-300'}`}>
-                            <img src="/assets/leagues/pogo_great_league.webp" alt="Great League" className="h-4 w-4 object-contain" />
-                            <span>Great</span>
-                        </button>
-                        <button onClick={() => setSelectedLeague('ultra')} className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-[0.18em] ${selectedLeague === 'ultra' ? 'bg-amber-400 text-black' : 'bg-slate-800 text-slate-300'}`}>
-                            <img src="/assets/leagues/pogo_ultra_league.webp" alt="Ultra League" className="h-4 w-4 object-contain" />
-                            <span>Ultra</span>
-                        </button>
-                        <button onClick={() => setSelectedLeague('master')} className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-[0.18em] ${selectedLeague === 'master' ? 'bg-amber-400 text-black' : 'bg-slate-800 text-slate-300'}`}>
-                            <img src="/assets/leagues/pogo_master_league.webp" alt="Master League" className="h-4 w-4 object-contain" />
-                            <span>Master</span>
-                        </button>
-                    </div>
-
-                    <div className="mb-4 flex gap-2 justify-center flex-wrap">
-                        {rankingOptions.map((option) => {
-                            const isSelected = selectedTop === option;
-                            return (
-                                <button
-                                    key={String(option)}
-                                    onClick={() => setSelectedTop(option)}
-                                    className={`px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-[0.14em] ${isSelected ? 'bg-slate-200 text-slate-900' : 'bg-slate-800 text-slate-300'}`}
-                                >
-                                    {option === 'all' ? 'Todas' : `Top ${option}`}
-                                </button>
-                            );
-                        })}
-                    </div>
-
-
-
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left text-sm">
-                            <thead>
-                                <tr className="text-slate-400 text-[10px] uppercase tracking-[0.18em]">
-                                    <th className="px-2 py-2 font-medium">Pos.</th>
-                                    <th className="px-2 py-2 font-medium">IV</th>
-                                    <th className="px-2 py-2 font-medium">Sum</th>
-                                    <th className="px-2 py-2 font-medium">Prod.</th>
-                                    <th className="px-2 py-2 font-medium">%</th>
-                                    <th className="px-2 py-2 font-medium">CP</th>
-                                    <th className="px-2 py-2 font-medium">Lvl</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {getVisibleRankingSlice(selectedLeague === 'great' ? topGreatIvs : selectedLeague === 'ultra' ? topUltraIvs : topMasterIvs).map((it, idx) => {
-                                    const isCurrent = it.atk === attack && it.def === defense && it.hp === stamina;
-                                    const isTopTier = idx < 10;
-                                    return (
-                                        <tr key={`${selectedLeague}-${it.atk}-${it.def}-${it.hp}`} className={`${isCurrent ? 'bg-amber-600/20' : 'bg-slate-800/70'} border-b border-slate-700`}>
-                                            <td className="px-2 py-2 w-12">
-                                                <span className={`inline-flex min-w-9 justify-center rounded-full border px-1.5 py-1 text-[11px] font-black ${isCurrent ? 'border-amber-300/80 bg-amber-500/10 text-amber-200 ring-1 ring-amber-300/60' : 'border-slate-600 bg-slate-700 text-slate-200'} ${isTopTier ? '' : ''}`}>
-                                                    #{idx + 1}
+                                {/* Una tarjeta por liga: posición del IV actual y el mejor PC
+                                    que alcanza sin pasarse del tope. */}
+                                <div className="grid min-w-72 flex-[1.25] grid-cols-3 gap-2">
+                                    {leagueCards.map(({ id, label, icon, rank, total, bestCp, exceedsLimit, cap }) => (
+                                        <div
+                                            key={id}
+                                            className={`rounded-xl border px-2 py-3 text-center ${getRankCardStyle(rank, exceedsLimit)}`}
+                                            title={
+                                                exceedsLimit
+                                                    ? `Con este nivel supera el tope de ${cap} PC de la liga ${label}`
+                                                    : `Liga ${label}`
+                                            }
+                                        >
+                                            <div className="flex items-center justify-center gap-1.5">
+                                                <img src={icon} alt="" aria-hidden="true" className="h-5 w-5 object-contain" />
+                                                <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-300">
+                                                    {label}
                                                 </span>
-                                            </td>
-                                            <td className="px-2 py-2 font-medium text-slate-100">{it.atk}/{it.def}/{it.hp}</td>
-                                            <td className="px-2 py-2 text-slate-400">{it.sum}</td>
-                                            <td className="px-2 py-2 font-mono text-slate-300">{Number(it.statProduct ?? 0).toLocaleString()}</td>
-                                            <td className="px-2 py-2 font-mono text-slate-300">{(Number(it.pct ?? 0)).toFixed(2)}%</td>
-                                            <td className="px-2 py-2 font-mono text-slate-400">{it.cp}</td>
-                                            <td className="px-2 py-2 text-slate-300">{it.bestLevel}</td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
+                                            </div>
+                                            <p className="mt-1 font-mono text-2xl font-black tabular-nums text-slate-100">
+                                                {rank ? `#${rank.toLocaleString('es-CL')}` : '—'}
+                                            </p>
+                                            <p className="text-[11px] tabular-nums text-slate-500">
+                                                de {total ? total.toLocaleString('es-CL') : '—'}
+                                            </p>
+                                            <p className="mt-1.5 flex flex-wrap items-center justify-center gap-x-2 border-t border-white/5 pt-1.5 text-[11px] tabular-nums text-slate-400">
+                                                <span className="whitespace-nowrap">
+                                                    {bestCp > 10 ? `máx ${bestCp} PC` : '—'}
+                                                </span>
+                                                {exceedsLimit && (
+                                                    <span className="whitespace-nowrap font-bold uppercase tracking-wide text-red-300">
+                                                        Excede PC
+                                                    </span>
+                                                )}
+                                            </p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <p className="text-[10px] leading-relaxed text-slate-600">
+                                La posición ordena las 4096 combinaciones por producto de estadísticas al mejor
+                                nivel de cada liga. «Máx PC» es el tope que alcanza este IV sin pasarse del límite.
+                            </p>
+                        </>
+                    )}
+                </div>
+
+                {/* Etiqueta, valor y barra en una sola línea: a lo ancho de la tarjeta
+                    el bloque de antes dejaba media fila vacía debajo del deslizador. */}
+                <div className="rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">
+                            Nivel del Pokémon
+                        </span>
+                        <input
+                            type="number"
+                            min="1"
+                            max="50"
+                            step="1"
+                            value={level}
+                            onChange={(event) => {
+                                const nextValue = Number(event.target.value);
+                                if (Number.isInteger(nextValue) && nextValue >= 1 && nextValue <= 50) {
+                                    setLevel(nextValue);
+                                }
+                            }}
+                            className="w-16 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-right font-mono text-sm text-white outline-none focus:border-amber-400"
+                            aria-label="Nivel del Pokémon"
+                        />
+                        <input
+                            type="range"
+                            min="1"
+                            max="50"
+                            step="1"
+                            value={level}
+                            onChange={(e) => setLevel(Number(e.target.value))}
+                            className="h-2 min-w-40 flex-1 cursor-pointer appearance-none rounded-lg bg-slate-800 accent-amber-400"
+                        />
                     </div>
                 </div>
+
+                <div className="flex flex-col gap-4">
+                    <div className="flex items-center justify-between gap-3">
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                            Selector de IV
+                        </span>
+                        <select
+                            value={ivInputMode}
+                            onChange={(event) => setIvInputMode(event.target.value as typeof ivInputMode)}
+                            className="cursor-pointer rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-300 outline-none focus:border-amber-400"
+                            aria-label="Tipo de selector de IV"
+                        >
+                            <option value="buttons">Selección directa</option>
+                            <option value="slider">Deslizador</option>
+                            <option value="manual">Ingresar manualmente</option>
+                        </select>
+                    </div>
+
+                    {ivControls.map((control) => (
+                        <IvSelector
+                            key={control.label}
+                            label={control.label}
+                            value={control.value}
+                            onChange={control.setValue}
+                            mode={ivInputMode}
+                            labelClass={control.labelClass}
+                            selectedClass={control.selectedClass}
+                            trailClass={control.trailClass}
+                            sliderClass={control.sliderClass}
+                        />
+                    ))}
+                </div>
+            </section>
+
+            {baseStats && (
+                <IvRanking
+                    lists={rankingLists}
+                    attack={attack}
+                    defense={defense}
+                    stamina={stamina}
+                    className="lg:col-span-2"
+                />
             )}
-        </div>
+        </>
     );
 }

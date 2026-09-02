@@ -63,8 +63,8 @@ export default function PinnedAnalyses({ analyses, activeId, onSelect, onRemove,
                                         size={32}
                                         className="h-8 w-8 object-contain"
                                     />
-                                    {form === 'mega' && <MegaSymbol className="absolute -bottom-1 -left-1 h-4 w-4" />}
-                                    {form === 'shadow' && <ShadowSymbol className="absolute -bottom-1 -left-1 h-4 w-4" />}
+                                    {form === 'mega' && <MegaSymbol className="absolute -right-1 -top-1 h-4 w-4" />}
+                                    {form === 'shadow' && <ShadowSymbol className="absolute -right-1 -top-1 h-4 w-4" />}
                                 </span>
                                 <span className="min-w-0">
                                     <span className="block max-w-28 truncate text-xs font-medium capitalize">

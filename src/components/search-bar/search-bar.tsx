@@ -18,11 +18,24 @@ export default function SearchBar({ onSelectPokemon, history = [], selectedPokem
     const [suggestions, setSuggestions] = useState<any[]>([]);
     const [isInputFocused, setIsInputFocused] = useState(false);
 
+    /**
+     * Si el desplegable está abierto, aparte de si el input tiene el foco.
+     *
+     * Son dos cosas distintas y antes se llevaban en un solo estado: al elegir
+     * una sugerencia se marcaba el input como "sin foco" para cerrar la lista,
+     * pero el `preventDefault` del `onMouseDown` evita el blur, así que el foco
+     * real nunca se iba. A partir de ahí el estado decía una cosa y el DOM otra,
+     * y las búsquedas siguientes ya no mostraban nada hasta hacer clic fuera y
+     * volver a entrar.
+     */
+    const [isOpen, setIsOpen] = useState(false);
+
     const handleSearch = (e: React.FormEvent) => {
         e.preventDefault();
         if (!query) return;
 
         setError(false);
+        setIsOpen(false);
         const data = searchLocalPokemon(query);
 
         if (data) {
@@ -34,31 +47,29 @@ export default function SearchBar({ onSelectPokemon, history = [], selectedPokem
     };
 
     useEffect(() => {
-        if (!isInputFocused || !query || query.trim().length < 1) {
-            setSuggestions([]);
-            return;
-        }
-        const results = searchLocalSuggestions(query, 8);
-        setSuggestions(results);
-    }, [query, isInputFocused]);
+        setSuggestions(query.trim() ? searchLocalSuggestions(query, 8) : []);
+    }, [query]);
 
     const handleFocus = () => {
         setIsInputFocused(true);
-        if (query.trim()) {
-            setSuggestions(searchLocalSuggestions(query, 8));
-        }
+        setIsOpen(true);
+    };
+
+    const handleQueryChange = (value: string) => {
+        setQuery(value);
+        // Escribir siempre vuelve a abrir la lista, aunque venga de elegir algo.
+        setIsOpen(true);
     };
 
     const handleSelectSuggestion = (p: any) => {
         setQuery(p.speciesName);
-        setSuggestions([]);
-        setIsInputFocused(false);
+        setIsOpen(false);
         onSelectPokemon(p);
     };
 
     const handleSelectHistory = (item: SearchBarProps['history'][number]) => {
         setQuery(item.name);
-        setIsInputFocused(false);
+        setIsOpen(false);
         onSelectPokemon(item.data);
     };
 
@@ -71,7 +82,7 @@ export default function SearchBar({ onSelectPokemon, history = [], selectedPokem
                     value={query}
                     onFocus={handleFocus}
                     onBlur={() => setIsInputFocused(false)}
-                    onChange={(e) => setQuery(e.target.value)}
+                    onChange={(e) => handleQueryChange(e.target.value)}
                     className="flex-1 bg-slate-800 text-white px-4 py-2 rounded-xl border border-slate-700 focus:outline-none focus:border-amber-500"
                 />
                 <button
@@ -81,7 +92,7 @@ export default function SearchBar({ onSelectPokemon, history = [], selectedPokem
                     Buscar
                 </button>
             </div>
-            {isInputFocused && (suggestions.length > 0 || history.length > 0) && (
+            {isInputFocused && isOpen && (suggestions.length > 0 || history.length > 0) && (
                 <div className="absolute left-0 right-0 z-20 mt-2 max-h-96 overflow-y-auto bg-slate-800 border border-slate-700 rounded-xl shadow-xl">
                     {history.length > 0 && (
                         <div className={`${suggestions.length > 0 ? 'border-b border-slate-700/60' : ''} p-3`}>
@@ -121,10 +132,10 @@ export default function SearchBar({ onSelectPokemon, history = [], selectedPokem
                                                 className="h-7 w-7 object-contain"
                                             />
                                             {specialForm(item.data) === 'mega' && (
-                                                <MegaSymbol className="absolute -bottom-1 -left-1 h-4 w-4" />
+                                                <MegaSymbol className="absolute -right-1 -top-1 h-4 w-4" />
                                             )}
                                             {specialForm(item.data) === 'shadow' && (
-                                                <ShadowSymbol className="absolute -bottom-1 -left-1 h-4 w-4" />
+                                                <ShadowSymbol className="absolute -right-1 -top-1 h-4 w-4" />
                                             )}
                                         </span>
                                         <span className="whitespace-nowrap text-xs font-medium capitalize">
@@ -153,10 +164,10 @@ export default function SearchBar({ onSelectPokemon, history = [], selectedPokem
                                     className="w-12 h-12 object-contain"
                                 />
                                 {specialForm(s) === 'mega' && (
-                                    <MegaSymbol className="absolute -bottom-1 -left-1 h-5 w-5" />
+                                    <MegaSymbol className="absolute -right-1 -top-1 h-5 w-5" />
                                 )}
                                 {specialForm(s) === 'shadow' && (
-                                    <ShadowSymbol className="absolute -bottom-1 -left-1 h-5 w-5" />
+                                    <ShadowSymbol className="absolute -right-1 -top-1 h-5 w-5" />
                                 )}
                             </span>
                             <span className="flex-1 min-w-0">
