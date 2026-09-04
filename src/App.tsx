@@ -102,7 +102,7 @@ function migrateHistory(stored: any): HistoryItem[] {
 }
 
 export default function App() {
-  const [selectedPokemon, setSelectedPokemon] = useState<any | null>(null);
+  const [selectedPokemon, setSelectedPokemon] = useState<any | null>(() => POKEMON_BY_ID.get('pikachu') ?? null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [ivValues, setIvValues] = useState<IvValues>({ attack: 15, defense: 15, stamina: 15, level: 20 });
   const [pinnedAnalyses, setPinnedAnalyses] = useState<PinnedAnalysis[]>([]);
