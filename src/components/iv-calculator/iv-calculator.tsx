@@ -120,7 +120,8 @@ const CPM_TABLE: Record<number, number> = {
     48.5: 0.83279999,
     49: 0.83529999,
     49.5: 0.83779999,
-    50: 0.84029999
+    50: 0.84029999,
+    51: 0.84530002,
 };
 
 const EMPTY_RANKINGS: Record<League, RankedCombo[]> = { great: [], ultra: [], master: [] };
@@ -204,12 +205,14 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
     const setLevel = (value: number) => onIvValuesChange({ ...ivValues, level: value });
 
     const [ivInputMode, setIvInputMode] = useState<IvInputMode>('buttons');
+    const [isBestBuddy, setIsBestBuddy] = useState(false);
     const [cp, setCp] = useState<number>(0);
     const [cpMultipliers, setCpMultipliers] = useState<Record<number, number> | null>(null);
     const [rankingLists, setRankingLists] = useState<Record<League, RankedCombo[]>>(EMPTY_RANKINGS);
 
     /** Mejor PC alcanzable sin pasarse del tope de cada liga. */
     const [bestCpByLeague, setBestCpByLeague] = useState<Record<League, number>>({ great: 0, ultra: 0, master: 0 });
+    const maxLevel = isBestBuddy ? 51 : 50;
 
     const totalIv = attack + defense + stamina;
     const percentage = ((totalIv / 45) * 100).toFixed(1);
@@ -290,6 +293,8 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
 
         const levels = Object.keys(cpMultipliers ?? CPM_TABLE)
             .map(Number)
+            .concat(isBestBuddy ? [51] : [])
+            .filter((lvl, index, values) => values.indexOf(lvl) === index)
             .sort((a, b) => a - b);
 
         const mejores = { great: 0, ultra: 0, master: 0 };
@@ -303,7 +308,7 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
         });
 
         setBestCpByLeague(mejores);
-    }, [attack, defense, stamina, level, baseAtk, baseDef, baseHp, cpMultipliers]);
+    }, [attack, defense, stamina, level, baseAtk, baseDef, baseHp, cpMultipliers, isBestBuddy]);
 
     const leagueCards = useMemo(
         () =>
@@ -325,11 +330,19 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
     );
 
     const getRankCardStyle = (rank: number | null, exceedsLimit: boolean) => {
-        if (exceedsLimit) return 'border-red-400/60 bg-red-950/40';
-        if (rank === 1) return 'border-amber-300/70 bg-amber-950/40';
-        if (rank !== null && rank <= 10) return 'border-emerald-400/60 bg-emerald-950/30';
-        if (rank !== null && rank <= 200) return 'border-blue-400/60 bg-blue-950/30';
+        if (exceedsLimit) return 'border-red-400 bg-red-900/60 shadow-lg shadow-red-950/40';
+        if (rank === 1) return 'border-amber-300 bg-amber-900/60 shadow-lg shadow-amber-950/40';
+        if (rank !== null && rank <= 10) return 'border-emerald-400 bg-emerald-900/55 shadow-lg shadow-emerald-950/30';
+        if (rank !== null && rank <= 200) return 'border-blue-400 bg-blue-900/55 shadow-lg shadow-blue-950/30';
         return 'border-slate-800 bg-slate-950/50';
+    };
+
+    const getRankAccentStyle = (rank: number | null, exceedsLimit: boolean) => {
+        if (exceedsLimit) return 'text-red-200';
+        if (rank === 1) return 'text-amber-200';
+        if (rank !== null && rank <= 10) return 'text-emerald-200';
+        if (rank !== null && rank <= 200) return 'text-blue-200';
+        return 'text-slate-100';
     };
 
     const ivControls = [
@@ -403,8 +416,8 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
 
                     {baseStats && (
                         <>
-                            <div className="flex flex-wrap items-stretch gap-3">
-                                <div className="grid min-w-60 flex-1 grid-cols-2 gap-2 sm:grid-cols-4">
+                            <div className="flex flex-col gap-4">
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
                                     {[
                                         { label: 'IV', value: `${attack}/${defense}/${stamina}`, className: 'text-slate-100' },
                                         { label: '% total', value: `${percentage}%`, className: totalIv === 45 ? 'text-amber-300' : 'text-slate-100' },
@@ -413,7 +426,7 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
                                     ].map(({ label, value, className }) => (
                                         <div
                                             key={label}
-                                            className="flex flex-col justify-center rounded-xl border border-slate-800 bg-slate-950/50 px-2 py-3 text-center"
+                                            className="flex flex-col justify-center border-b border-slate-800/80 px-2 pb-2 text-center sm:border-b-0 sm:border-r sm:last:border-r-0"
                                         >
                                             <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">{label}</p>
                                             <p className={`mt-1 font-mono text-base font-bold tabular-nums ${className}`}>{value}</p>
@@ -423,7 +436,7 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
 
                                 {/* Una tarjeta por liga: posición del IV actual y el mejor PC
                                     que alcanza sin pasarse del tope. */}
-                                <div className="grid min-w-72 flex-[1.25] grid-cols-3 gap-2">
+                                <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-3">
                                     {leagueCards.map(({ id, label, icon, rank, total, bestCp, exceedsLimit, cap }) => (
                                         <div
                                             key={id}
@@ -435,16 +448,13 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
                                             }
                                         >
                                             <div className="flex items-center justify-center gap-1.5">
-                                                <img src={icon} alt="" aria-hidden="true" className="h-5 w-5 object-contain" />
-                                                <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-300">
+                                                <img src={icon} alt="" aria-hidden="true" className="h-10 w-10 object-contain" />
+                                                <span className={`text-[16px] font-semibold uppercase tracking-[0.12em] ${getRankAccentStyle(rank, exceedsLimit)}`}>
                                                     {label}
                                                 </span>
                                             </div>
-                                            <p className="mt-1 font-mono text-2xl font-black tabular-nums text-slate-100">
+                                            <p className={`mt-1 font-mono text-2xl font-black tabular-nums ${getRankAccentStyle(rank, exceedsLimit)}`}>
                                                 {rank ? `#${rank.toLocaleString('es-CL')}` : '—'}
-                                            </p>
-                                            <p className="text-[11px] tabular-nums text-slate-500">
-                                                de {total ? total.toLocaleString('es-CL') : '—'}
                                             </p>
                                             <p className="mt-1.5 flex flex-wrap items-center justify-center gap-x-2 border-t border-white/5 pt-1.5 text-[11px] tabular-nums text-slate-400">
                                                 <span className="whitespace-nowrap">
@@ -472,6 +482,9 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
                 {/* Etiqueta, valor y barra en una sola línea: a lo ancho de la tarjeta
                     el bloque de antes dejaba media fila vacía debajo del deslizador. */}
                 <div className="rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3">
+                    <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        Ajustar valores
+                    </p>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                         <span className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">
                             Nivel del Pokémon
@@ -479,12 +492,12 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
                         <input
                             type="number"
                             min="1"
-                            max="50"
-                            step="1"
+                            max={maxLevel}
+                            step="0.5"
                             value={level}
                             onChange={(event) => {
                                 const nextValue = Number(event.target.value);
-                                if (Number.isInteger(nextValue) && nextValue >= 1 && nextValue <= 50) {
+                                if (Number.isInteger(nextValue) && nextValue >= 1 && nextValue <= maxLevel) {
                                     setLevel(nextValue);
                                 }
                             }}
@@ -494,19 +507,38 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
                         <input
                             type="range"
                             min="1"
-                            max="50"
-                            step="1"
+                            max={maxLevel}
+                            step="0.5"
                             value={level}
                             onChange={(e) => setLevel(Number(e.target.value))}
                             className="h-2 min-w-40 flex-1 cursor-pointer appearance-none rounded-lg bg-slate-800 accent-amber-400"
                         />
+                        <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-400">
+                            <input
+                                type="checkbox"
+                                checked={isBestBuddy}
+                                onChange={(event) => {
+                                    const enabled = event.target.checked;
+                                    setIsBestBuddy(enabled);
+                                    if (!enabled && level > 50) setLevel(50);
+                                }}
+                                className="h-4 w-4 cursor-pointer accent-amber-400"
+                            />
+                            <img
+                                src="/assets/indicators/bestBuddyBadge.webp"
+                                alt=""
+                                aria-hidden="true"
+                                className="h-6 w-6 object-contain"
+                            />
+                            <span>Mejor compañero</span>
+                        </label>
                     </div>
                 </div>
 
                 <div className="flex flex-col gap-4">
                     <div className="flex items-center justify-between gap-3">
                         <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                            Selector de IV
+                            Ajustar IVs
                         </span>
                         <select
                             value={ivInputMode}

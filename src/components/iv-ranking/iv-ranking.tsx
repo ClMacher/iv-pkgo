@@ -76,6 +76,7 @@ export default function IvRanking({ lists, attack, defense, stamina, className =
         () => list.findIndex((it) => it.atk === attack && it.def === defense && it.hp === stamina),
         [list, attack, defense, stamina],
     );
+    const currentCombo = myIndex >= 0 ? list[myIndex] : null;
 
     const totalFiltrado = top === 'all' ? list.length : Math.min(Number(top), list.length);
 
@@ -213,6 +214,41 @@ export default function IvRanking({ lists, attack, defense, stamina, className =
                         </tr>
                     </thead>
                     <tbody>
+                        {currentCombo && (
+                            <tr className="border-b-2 border-amber-400/50 bg-amber-400/15">
+                                <td className="py-2 pl-4 pr-3">
+                                    <div className="flex flex-col">
+                                        <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-amber-300">
+                                            Actual
+                                        </span>
+                                        <span className="font-mono text-xs font-bold tabular-nums text-amber-200/80">
+                                            #{(myIndex + 1).toLocaleString('es-CL')}
+                                        </span>
+                                    </div>
+                                </td>
+                                <td className="px-3 py-2 font-mono text-[15px] font-bold text-amber-100">
+                                    {currentCombo.atk}/{currentCombo.def}/{currentCombo.hp}
+                                </td>
+                                <td className="px-3 py-2 text-right font-semibold tabular-nums text-amber-100/80">
+                                    {currentCombo.sum}
+                                </td>
+                                <td className="px-3 py-2 text-right font-mono text-xs font-semibold tabular-nums text-amber-100/80">
+                                    {Math.round(Number(currentCombo.statProduct ?? 0)).toLocaleString('es-CL')}
+                                </td>
+                                <td className="px-3 py-2">
+                                    <span className="font-mono text-xs font-bold tabular-nums text-amber-100">
+                                        {Number(currentCombo.pct ?? 0).toFixed(2)}%
+                                    </span>
+                                </td>
+                                <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums text-amber-100/80">
+                                    {currentCombo.cp}
+                                </td>
+                                <td className="px-3 py-2 text-right font-semibold tabular-nums text-amber-100/80">
+                                    {currentCombo.bestLevel}
+                                </td>
+                            </tr>
+                        )}
+
                         {visible.map((it, idx) => {
                             const isCurrent = it.atk === attack && it.def === defense && it.hp === stamina;
                             const pct = Number(it.pct ?? 0);
