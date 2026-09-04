@@ -2,7 +2,7 @@
 export default function ShadowSymbol({ className }: { className?: string }) {
     return (
         <img
-            src="/assets/indicators/shadow.webp"
+            src={`${import.meta.env.BASE_URL}assets/indicators/shadow.webp`}
             alt="Shadow"
             className={className}
             width={192}

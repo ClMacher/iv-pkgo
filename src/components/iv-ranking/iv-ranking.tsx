@@ -22,9 +22,9 @@ interface IvRankingProps {
 }
 
 const LEAGUES: Array<{ id: League; label: string; icon: string }> = [
-    { id: 'great', label: 'Great', icon: '/assets/leagues/pogo_great_league.webp' },
-    { id: 'ultra', label: 'Ultra', icon: '/assets/leagues/pogo_ultra_league.webp' },
-    { id: 'master', label: 'Master', icon: '/assets/leagues/pogo_master_league.webp' },
+    { id: 'great', label: 'Great', icon: `${import.meta.env.BASE_URL}assets/leagues/pogo_great_league.webp` },
+    { id: 'ultra', label: 'Ultra', icon: `${import.meta.env.BASE_URL}assets/leagues/pogo_ultra_league.webp` },
+    { id: 'master', label: 'Master', icon: `${import.meta.env.BASE_URL}assets/leagues/pogo_master_league.webp` },
 ];
 
 const TOP_OPTIONS: Array<number | 'all'> = [10, 50, 100, 500, 'all'];

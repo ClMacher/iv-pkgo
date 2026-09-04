@@ -36,7 +36,7 @@ export default function TypeBadge({ type }: { type: string }) {
             aria-label={type}
         >
             <img
-                src={`/assets/types/${assetName}`}
+                src={`${import.meta.env.BASE_URL}assets/types/${assetName}`}
                 alt={type}
                 className="h-6 w-6 object-contain"
             />

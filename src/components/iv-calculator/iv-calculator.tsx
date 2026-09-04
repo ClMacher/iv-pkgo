@@ -125,11 +125,12 @@ const CPM_TABLE: Record<number, number> = {
 };
 
 const EMPTY_RANKINGS: Record<League, RankedCombo[]> = { great: [], ultra: [], master: [] };
+const ASSET_BASE = import.meta.env.BASE_URL;
 
 const LEAGUE_DEFS = [
-    { id: 'great' as League, label: 'Great', icon: '/assets/leagues/pogo_great_league.webp', cap: 1500 },
-    { id: 'ultra' as League, label: 'Ultra', icon: '/assets/leagues/pogo_ultra_league.webp', cap: 2500 },
-    { id: 'master' as League, label: 'Master', icon: '/assets/leagues/pogo_master_league.webp', cap: null },
+    { id: 'great' as League, label: 'Great', icon: `${ASSET_BASE}assets/leagues/pogo_great_league.webp`, cap: 1500 },
+    { id: 'ultra' as League, label: 'Ultra', icon: `${ASSET_BASE}assets/leagues/pogo_ultra_league.webp`, cap: 2500 },
+    { id: 'master' as League, label: 'Master', icon: `${ASSET_BASE}assets/leagues/pogo_master_league.webp`, cap: null },
 ];
 
 /**
@@ -525,7 +526,7 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
                                 className="h-4 w-4 cursor-pointer accent-amber-400"
                             />
                             <img
-                                src="/assets/indicators/bestBuddyBadge.webp"
+                                src={`${ASSET_BASE}assets/indicators/bestBuddyBadge.webp`}
                                 alt=""
                                 aria-hidden="true"
                                 className="h-6 w-6 object-contain"

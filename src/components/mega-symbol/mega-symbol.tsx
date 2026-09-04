@@ -13,7 +13,7 @@
 export default function MegaSymbol({ className }: { className?: string }) {
     return (
         <img
-            src="/assets/indicators/mega-stone.webp"
+            src={`${import.meta.env.BASE_URL}assets/indicators/mega-stone.webp`}
             alt=""
             aria-hidden="true"
             className={className}
