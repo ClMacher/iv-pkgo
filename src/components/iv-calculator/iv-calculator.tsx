@@ -20,7 +20,7 @@ interface IvCalculatorProps {
     onPinAnalysis?: () => void;
 }
 
-// Valores sincronizados con https://pogoapi.net/api/v1/cp_multiplier.json
+// Tabla CPM estática para los niveles disponibles en Pokémon GO.
 const CPM_TABLE: Record<number, number> = {
     1: 0.09399999678134918,
     1.5: 0.1351374313235283,
@@ -100,16 +100,16 @@ const CPM_TABLE: Record<number, number> = {
     38.5: 0.78179006,
     39: 0.78463697,
     39.5: 0.78747358,
-    40: 0.79030001,
-    40.5: 0.79280001,
+    40: 0.7903,
+    40.5: 0.792803968,
     41: 0.79530001,
-    41.5: 0.79780001,
+    41.5: 0.797800015,
     42: 0.8003,
-    42.5: 0.8028,
+    42.5: 0.802799995,
     43: 0.8053,
     43.5: 0.8078,
     44: 0.81029999,
-    44.5: 0.81279999,
+    44.5: 0.812799985,
     45: 0.81529999,
     45.5: 0.81779999,
     46: 0.82029999,
@@ -121,7 +121,8 @@ const CPM_TABLE: Record<number, number> = {
     49: 0.83529999,
     49.5: 0.83779999,
     50: 0.84029999,
-    51: 0.84530002,
+    50.5: 0.84279999,
+    51: 0.84529999,
 };
 
 const EMPTY_RANKINGS: Record<League, RankedCombo[]> = { great: [], ultra: [], master: [] };
@@ -294,7 +295,7 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
 
         const levels = Object.keys(cpMultipliers ?? CPM_TABLE)
             .map(Number)
-            .concat(isBestBuddy ? [51] : [])
+            .filter((lvl) => lvl <= maxLevel)
             .filter((lvl, index, values) => values.indexOf(lvl) === index)
             .sort((a, b) => a - b);
 
@@ -309,7 +310,7 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
         });
 
         setBestCpByLeague(mejores);
-    }, [attack, defense, stamina, level, baseAtk, baseDef, baseHp, cpMultipliers, isBestBuddy]);
+    }, [attack, defense, stamina, level, baseAtk, baseDef, baseHp, cpMultipliers, isBestBuddy, maxLevel]);
 
     const leagueCards = useMemo(
         () =>
@@ -319,15 +320,16 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
                 const idx = lista.findIndex(
                     (it) => it.atk === attack && it.def === defense && it.hp === stamina,
                 );
+                const currentCombo = idx >= 0 ? lista[idx] : undefined;
                 return {
                     ...liga,
                     rank: idx >= 0 ? idx + 1 : null,
-                    total: lista.length,
                     bestCp: bestCpByLeague[liga.id],
+                    bestLevel: currentCombo ? Math.min(currentCombo.bestLevel, maxLevel) : null,
                     exceedsLimit: liga.cap !== null && cp > liga.cap,
                 };
             }),
-        [rankingLists, bestCpByLeague, cp, attack, defense, stamina],
+        [rankingLists, bestCpByLeague, cp, attack, defense, stamina, maxLevel],
     );
 
     const getRankCardStyle = (rank: number | null, exceedsLimit: boolean) => {
@@ -438,7 +440,7 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
                                 {/* Una tarjeta por liga: posición del IV actual y el mejor PC
                                     que alcanza sin pasarse del tope. */}
                                 <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-3">
-                                    {leagueCards.map(({ id, label, icon, rank, total, bestCp, exceedsLimit, cap }) => (
+                                    {leagueCards.map(({ id, label, icon, rank, bestCp, bestLevel, exceedsLimit, cap }) => (
                                         <div
                                             key={id}
                                             className={`rounded-xl border px-2 py-3 text-center ${getRankCardStyle(rank, exceedsLimit)}`}
@@ -459,7 +461,11 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
                                             </p>
                                             <p className="mt-1.5 flex flex-wrap items-center justify-center gap-x-2 border-t border-white/5 pt-1.5 text-[11px] tabular-nums text-slate-400">
                                                 <span className="whitespace-nowrap">
-                                                    {bestCp > 10 ? `máx ${bestCp} PC` : '—'}
+                                                    {bestCp > 10 ? `${bestCp} PC` : '—'}
+                                                </span>
+                                                <span className="whitespace-nowrap">|</span>
+                                                <span className="whitespace-nowrap">
+                                                    {bestLevel ? `Nivel ${bestLevel}` : '—'}
                                                 </span>
                                                 {exceedsLimit && (
                                                     <span className="whitespace-nowrap font-bold uppercase tracking-wide text-red-300">
