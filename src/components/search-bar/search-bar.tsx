@@ -1,13 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { searchLocalPokemon, searchLocalSuggestions, pokemonTypes, specialForm } from '../../services/poke-api';
 import PokemonSprite from '../pokemon-sprite/pokemon-sprite';
 import TypeBadge from '../type-badge/type-badge';
 import MegaSymbol from '../mega-symbol/mega-symbol';
 import ShadowSymbol from '../shadow-symbol/shadow-symbol';
 
+type SearchHistoryItem = {
+    id: string;
+    name: string;
+    data: any;
+};
+
 interface SearchBarProps {
     onSelectPokemon: (pokemon: any | null) => void;
-    history?: Array<{ id: string; name: string; data: any }>;
+    history?: SearchHistoryItem[];
     selectedPokemonId?: string;
     onClearHistory?: () => void;
 }
@@ -17,6 +23,7 @@ export default function SearchBar({ onSelectPokemon, history = [], selectedPokem
     const [error, setError] = useState(false);
     const [suggestions, setSuggestions] = useState<any[]>([]);
     const [isInputFocused, setIsInputFocused] = useState(false);
+    const inputRef = useRef<HTMLInputElement>(null);
 
     /**
      * Si el desplegable está abierto, aparte de si el input tiene el foco.
@@ -61,13 +68,21 @@ export default function SearchBar({ onSelectPokemon, history = [], selectedPokem
         setIsOpen(true);
     };
 
+    const handleClearQuery = () => {
+        setQuery('');
+        setError(false);
+        setIsInputFocused(true);
+        setIsOpen(true);
+        inputRef.current?.focus();
+    };
+
     const handleSelectSuggestion = (p: any) => {
         setQuery(p.speciesName);
         setIsOpen(false);
         onSelectPokemon(p);
     };
 
-    const handleSelectHistory = (item: SearchBarProps['history'][number]) => {
+    const handleSelectHistory = (item: SearchHistoryItem) => {
         setQuery(item.name);
         setIsOpen(false);
         onSelectPokemon(item.data);
@@ -76,15 +91,30 @@ export default function SearchBar({ onSelectPokemon, history = [], selectedPokem
     return (
         <form onSubmit={handleSearch} className="relative">
             <div className="flex gap-2">
-                <input
-                    type="text"
-                    placeholder="Busca por nombre o Nº de Pokédex..."
-                    value={query}
-                    onFocus={handleFocus}
-                    onBlur={() => setIsInputFocused(false)}
-                    onChange={(e) => handleQueryChange(e.target.value)}
-                    className="flex-1 bg-slate-800 text-white px-4 py-2 rounded-xl border border-slate-700 focus:outline-none focus:border-amber-500"
-                />
+                <div className="relative flex-1">
+                    <input
+                        ref={inputRef}
+                        type="text"
+                        placeholder="Busca por nombre o Nº de Pokédex..."
+                        value={query}
+                        onFocus={handleFocus}
+                        onBlur={() => setIsInputFocused(false)}
+                        onChange={(e) => handleQueryChange(e.target.value)}
+                        className="w-full bg-slate-800 text-white px-4 py-2 pr-10 rounded-xl border border-slate-700 focus:outline-none focus:border-amber-500"
+                    />
+                    {query && (
+                        <button
+                            type="button"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={handleClearQuery}
+                            className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-slate-700 text-sm leading-none text-slate-300 transition-colors hover:bg-slate-600 hover:text-white cursor-pointer"
+                            title="Limpiar búsqueda"
+                            aria-label="Limpiar búsqueda"
+                        >
+                            ×
+                        </button>
+                    )}
+                </div>
                 <button
                     type="submit"
                     className="bg-amber-500 text-slate-950 font-bold px-5 py-2 rounded-xl hover:bg-amber-400 transition-colors cursor-pointer"

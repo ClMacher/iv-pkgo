@@ -1,4 +1,5 @@
 import gamemaster from "../data/gamemaster.json";
+import { CPM_TABLE } from "../data/cp-multipliers";
 
 interface PvPokePokemon {
   dex: number;
@@ -96,19 +97,7 @@ export function specialForm(pokemon: any): SpecialForm {
 }
 
 export async function fetchCpMultipliers(): Promise<Record<number, number>> {
-  try {
-    const res = await fetch("https://pogoapi.net/api/v1/cp_multiplier.json");
-    if (!res.ok) throw new Error("Failed to fetch CPM");
-    const data = await res.json();
-    const map: Record<number, number> = {};
-    data.forEach((item: any) => {
-      map[item.level] = item.multiplier;
-    });
-    return map;
-  } catch (err) {
-    console.warn("Could not load cp multipliers:", err);
-    return {};
-  }
+  return CPM_TABLE;
 }
 
 // --- Precomputed rankings fetch + cache ---
