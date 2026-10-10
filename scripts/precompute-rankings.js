@@ -169,7 +169,11 @@ async function writeGzJson(filePath, obj) {
 }
 
 async function processSpecies(species, cpMap, levels, outDir, topN) {
-  const dex = species.dex ?? species.id ?? species.speciesId ?? null;
+  const dex = species.dex ?? species.id ?? null;
+  // Cada forma va a su propia carpeta. venusaur y venusaur_mega comparten el
+  // dex 3 pero tienen stats distintos, y antes la segunda sobrescribía a la
+  // primera: quedaba en disco la última que se procesara.
+  const speciesId = species.speciesId ?? String(dex);
   const name =
     species.name ?? species.speciesName ?? species.species ?? `dex${dex}`;
   if (!dex || !species.baseStats) return null;
@@ -274,6 +278,7 @@ async function processSpecies(species, cpMap, levels, outDir, topN) {
     resultsByLeague[leagueCap === null ? "master" : String(leagueCap)] = {
       meta: {
         species: dex,
+        speciesId,
         name,
         league: leagueCap === null ? "master" : leagueCap,
         total: list.length,
@@ -287,10 +292,10 @@ async function processSpecies(species, cpMap, levels, outDir, topN) {
 
   // write files
   for (const [leagueKey, data] of Object.entries(resultsByLeague)) {
-    const outPath = path.join(outDir, String(dex), `${leagueKey}.json.gz`);
+    const outPath = path.join(outDir, speciesId, `${leagueKey}.json.gz`);
     await writeGzJson(outPath, data);
   }
-  return { dex, name };
+  return { dex, speciesId, name };
 }
 
 async function main() {
@@ -312,6 +317,7 @@ async function main() {
     const wanted = speciesArg.split(",").map((x) => x.trim());
     speciesList = gm.filter(
       (s) =>
+        wanted.includes(String(s.speciesId)) ||
         wanted.includes(String(s.dex)) ||
         wanted.includes(String(s.species)) ||
         wanted.includes((s.name || "").toLowerCase()),
@@ -322,7 +328,7 @@ async function main() {
   for (const sp of speciesList) {
     try {
       const meta = await processSpecies(sp, cpMap, levels, out, top);
-      if (meta) console.log("Wrote species", meta.dex, meta.name);
+      if (meta) console.log("Wrote species", meta.speciesId, meta.name);
     } catch (e) {
       console.error("Failed species", sp.dex ?? sp.id, e);
     }

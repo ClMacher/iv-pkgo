@@ -1,21 +1,48 @@
-import { useState, useEffect } from 'react';
-import { searchLocalPokemon, searchLocalSuggestions } from '../../services/poke-api';
+import { useState, useEffect, useRef } from 'react';
+import { searchLocalPokemon, searchLocalSuggestions, pokemonTypes, specialForm } from '../../services/poke-api';
+import PokemonSprite from '../pokemon-sprite/pokemon-sprite';
+import TypeBadge from '../type-badge/type-badge';
+import MegaSymbol from '../mega-symbol/mega-symbol';
+import ShadowSymbol from '../shadow-symbol/shadow-symbol';
+
+type SearchHistoryItem = {
+    id: string;
+    name: string;
+    data: any;
+};
 
 interface SearchBarProps {
     onSelectPokemon: (pokemon: any | null) => void;
+    history?: SearchHistoryItem[];
+    selectedPokemonId?: string;
+    onClearHistory?: () => void;
 }
 
-export default function SearchBar({ onSelectPokemon }: SearchBarProps) {
+export default function SearchBar({ onSelectPokemon, history = [], selectedPokemonId, onClearHistory }: SearchBarProps) {
     const [query, setQuery] = useState('');
     const [error, setError] = useState(false);
     const [suggestions, setSuggestions] = useState<any[]>([]);
     const [isInputFocused, setIsInputFocused] = useState(false);
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    /**
+     * Si el desplegable está abierto, aparte de si el input tiene el foco.
+     *
+     * Son dos cosas distintas y antes se llevaban en un solo estado: al elegir
+     * una sugerencia se marcaba el input como "sin foco" para cerrar la lista,
+     * pero el `preventDefault` del `onMouseDown` evita el blur, así que el foco
+     * real nunca se iba. A partir de ahí el estado decía una cosa y el DOM otra,
+     * y las búsquedas siguientes ya no mostraban nada hasta hacer clic fuera y
+     * volver a entrar.
+     */
+    const [isOpen, setIsOpen] = useState(false);
 
     const handleSearch = (e: React.FormEvent) => {
         e.preventDefault();
         if (!query) return;
 
         setError(false);
+        setIsOpen(false);
         const data = searchLocalPokemon(query);
 
         if (data) {
@@ -27,33 +54,67 @@ export default function SearchBar({ onSelectPokemon }: SearchBarProps) {
     };
 
     useEffect(() => {
-        if (!isInputFocused || !query || query.trim().length < 1) {
-            setSuggestions([]);
-            return;
-        }
-        const results = searchLocalSuggestions(query, 8);
-        setSuggestions(results);
-    }, [query, isInputFocused]);
+        setSuggestions(query.trim() ? searchLocalSuggestions(query, 8) : []);
+    }, [query]);
+
+    const handleFocus = () => {
+        setIsInputFocused(true);
+        setIsOpen(true);
+    };
+
+    const handleQueryChange = (value: string) => {
+        setQuery(value);
+        // Escribir siempre vuelve a abrir la lista, aunque venga de elegir algo.
+        setIsOpen(true);
+    };
+
+    const handleClearQuery = () => {
+        setQuery('');
+        setError(false);
+        setIsInputFocused(true);
+        setIsOpen(true);
+        inputRef.current?.focus();
+    };
 
     const handleSelectSuggestion = (p: any) => {
         setQuery(p.speciesName);
-        setSuggestions([]);
-        setIsInputFocused(false);
+        setIsOpen(false);
         onSelectPokemon(p);
     };
 
+    const handleSelectHistory = (item: SearchHistoryItem) => {
+        setQuery(item.name);
+        setIsOpen(false);
+        onSelectPokemon(item.data);
+    };
+
     return (
-        <form onSubmit={handleSearch} className="max-w-md mx-auto mb-6 relative">
+        <form onSubmit={handleSearch} className="relative">
             <div className="flex gap-2">
-                <input
-                    type="text"
-                    placeholder="Busca por nombre o Nº de Pokédex..."
-                    value={query}
-                    onFocus={() => setIsInputFocused(true)}
-                    onBlur={() => setIsInputFocused(false)}
-                    onChange={(e) => setQuery(e.target.value)}
-                    className="flex-1 bg-slate-800 text-white px-4 py-2 rounded-xl border border-slate-700 focus:outline-none focus:border-amber-500"
-                />
+                <div className="relative flex-1">
+                    <input
+                        ref={inputRef}
+                        type="text"
+                        placeholder="Busca por nombre o Nº de Pokédex..."
+                        value={query}
+                        onFocus={handleFocus}
+                        onBlur={() => setIsInputFocused(false)}
+                        onChange={(e) => handleQueryChange(e.target.value)}
+                        className="w-full bg-slate-800 text-white px-4 py-2 pr-10 rounded-xl border border-slate-700 focus:outline-none focus:border-amber-500"
+                    />
+                    {query && (
+                        <button
+                            type="button"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={handleClearQuery}
+                            className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-slate-700 text-sm leading-none text-slate-300 transition-colors hover:bg-slate-600 hover:text-white cursor-pointer"
+                            title="Limpiar búsqueda"
+                            aria-label="Limpiar búsqueda"
+                        >
+                            ×
+                        </button>
+                    )}
+                </div>
                 <button
                     type="submit"
                     className="bg-amber-500 text-slate-950 font-bold px-5 py-2 rounded-xl hover:bg-amber-400 transition-colors cursor-pointer"
@@ -61,8 +122,60 @@ export default function SearchBar({ onSelectPokemon }: SearchBarProps) {
                     Buscar
                 </button>
             </div>
-            {isInputFocused && suggestions.length > 0 && (
-                <div className="mt-2 bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+            {isInputFocused && isOpen && (suggestions.length > 0 || history.length > 0) && (
+                <div className="absolute left-0 right-0 z-20 mt-2 max-h-96 overflow-y-auto bg-slate-800 border border-slate-700 rounded-xl shadow-xl">
+                    {history.length > 0 && (
+                        <div className={`${suggestions.length > 0 ? 'border-b border-slate-700/60' : ''} p-3`}>
+                            <p className="mb-2 px-1 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                                Historial
+                                {onClearHistory && (
+                                    <button
+                                        type="button"
+                                        onMouseDown={(event) => event.preventDefault()}
+                                        onClick={onClearHistory}
+                                        className="float-right cursor-pointer text-[10px] font-semibold normal-case tracking-normal text-slate-500 hover:text-red-300"
+                                        title="Eliminar todo el historial"
+                                    >
+                                        Eliminar todos
+                                    </button>
+                                )}
+                            </p>
+                            <div className="flex gap-2 overflow-x-auto pb-1">
+                                {history.map((item) => (
+                                    <button
+                                        key={item.id}
+                                        type="button"
+                                        onMouseDown={(e) => {
+                                            e.preventDefault();
+                                            handleSelectHistory(item);
+                                        }}
+                                        className={`flex shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-3 py-1.5 transition-colors ${selectedPokemonId === item.id
+                                            ? 'border-amber-500 bg-slate-700'
+                                            : 'border-slate-700 bg-slate-800 hover:bg-slate-700'
+                                            }`}
+                                    >
+                                        <span className="relative inline-flex shrink-0">
+                                            <PokemonSprite
+                                                pokemon={item.data}
+                                                variant="icon"
+                                                size={28}
+                                                className="h-7 w-7 object-contain"
+                                            />
+                                            {specialForm(item.data) === 'mega' && (
+                                                <MegaSymbol className="absolute -right-1 -top-1 h-4 w-4" />
+                                            )}
+                                            {specialForm(item.data) === 'shadow' && (
+                                                <ShadowSymbol className="absolute -right-1 -top-1 h-4 w-4" />
+                                            )}
+                                        </span>
+                                        <span className="whitespace-nowrap text-xs font-medium capitalize">
+                                            {item.name}
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                     {suggestions.map((s) => (
                         <button
                             key={s.speciesId}
@@ -71,14 +184,31 @@ export default function SearchBar({ onSelectPokemon }: SearchBarProps) {
                                 e.preventDefault();
                                 handleSelectSuggestion(s);
                             }}
-                            className="w-full text-left px-3 py-2 hover:bg-slate-700 transition-colors flex items-center gap-3"
+                            className="w-full text-left px-3 py-2 hover:bg-slate-700 transition-colors flex items-center gap-3 border-b border-slate-700/60 last:border-b-0"
                         >
-                            <img
-                                src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${s.dex}.png`}
-                                alt={s.speciesName}
-                                className="w-6 h-6 object-contain"
-                            />
-                            <span className="capitalize">{s.speciesName} <span className="text-xs text-slate-400">#{s.dex}</span></span>
+                            <span className="relative inline-flex shrink-0">
+                                <PokemonSprite
+                                    pokemon={s}
+                                    variant="icon"
+                                    size={48}
+                                    className="w-12 h-12 object-contain"
+                                />
+                                {specialForm(s) === 'mega' && (
+                                    <MegaSymbol className="absolute -right-1 -top-1 h-5 w-5" />
+                                )}
+                                {specialForm(s) === 'shadow' && (
+                                    <ShadowSymbol className="absolute -right-1 -top-1 h-5 w-5" />
+                                )}
+                            </span>
+                            <span className="flex-1 min-w-0">
+                                <span className="block capitalize truncate font-semibold">{s.speciesName}</span>
+                                <span className="mt-1 flex flex-wrap gap-1">
+                                    {pokemonTypes(s).map((t) => (
+                                        <TypeBadge key={t} type={t} />
+                                    ))}
+                                </span>
+                            </span>
+                            <span className="shrink-0 text-sm text-slate-400 tabular-nums">#{s.dex}</span>
                         </button>
                     ))}
                 </div>

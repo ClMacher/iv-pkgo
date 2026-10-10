@@ -1,4 +1,5 @@
 import gamemaster from "../data/gamemaster.json";
+import { CPM_TABLE } from "../data/cp-multipliers";
 
 interface PvPokePokemon {
   dex: number;
@@ -67,20 +68,36 @@ export function getBaseStats(pokemon: PvPokePokemon) {
   };
 }
 
+/**
+ * El gamemaster rellena con `none` el segundo tipo de los Pokémon de un solo
+ * tipo —806 de las 1742 entradas—, así que hay que descartarlo antes de
+ * pintar nada o la mitad de la lista mostraría una etiqueta vacía.
+ */
+export function pokemonTypes(pokemon: any): string[] {
+  return ((pokemon?.types ?? []) as string[]).filter((t) => t && t !== "none");
+}
+
+export type SpecialForm = "shadow" | "mega" | null;
+
+/**
+ * Marca de forma especial, leída de los tags del gamemaster y no del nombre.
+ *
+ * Vale la pena la distinción: el tag `mega` también cubre a Kyogre y Groudon
+ * Primal, que en GO usan la misma mecánica pero no llevan `_mega` en el
+ * speciesId. Buscando por el sufijo se quedarían fuera.
+ *
+ * Ninguna entrada es shadow y mega a la vez, así que devolver una sola marca
+ * alcanza.
+ */
+export function specialForm(pokemon: any): SpecialForm {
+  const tags = (pokemon?.tags ?? []) as string[];
+  if (tags.includes("shadow")) return "shadow";
+  if (tags.includes("mega")) return "mega";
+  return null;
+}
+
 export async function fetchCpMultipliers(): Promise<Record<number, number>> {
-  try {
-    const res = await fetch("https://pogoapi.net/api/v1/cp_multiplier.json");
-    if (!res.ok) throw new Error("Failed to fetch CPM");
-    const data = await res.json();
-    const map: Record<number, number> = {};
-    data.forEach((item: any) => {
-      map[item.level] = item.multiplier;
-    });
-    return map;
-  } catch (err) {
-    console.warn("Could not load cp multipliers:", err);
-    return {};
-  }
+  return CPM_TABLE;
 }
 
 // --- Precomputed rankings fetch + cache ---
@@ -90,13 +107,46 @@ type PrecomputedData = {
   map: Record<string, any>;
 };
 
-function saveCachedRanking(key: string, data: PrecomputedData) {
+/**
+ * Las entradas antiguas iban indexadas por número de dex (`precalc:3:...`).
+ * Ahora se indexan por speciesId, así que las numéricas ya no las lee nadie y
+ * sólo ocupan cuota.
+ */
+function purgeLegacyRankingCache(): number {
   try {
-    localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data }));
+    const stale: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && /^precalc:\d+:/.test(k)) stale.push(k);
+    }
+    stale.forEach((k) => localStorage.removeItem(k));
+    return stale.length;
   } catch (e) {
+    console.warn("Failed purging legacy ranking cache", e);
+    return 0;
+  }
+}
+
+function saveCachedRanking(key: string, data: PrecomputedData) {
+  const payload = JSON.stringify({ ts: Date.now(), data });
+  try {
+    localStorage.setItem(key, payload);
+  } catch {
+    // Antes de rendirse, tirar las entradas del esquema viejo y reintentar.
+    if (purgeLegacyRankingCache() > 0) {
+      try {
+        localStorage.setItem(key, payload);
+        return;
+      } catch (e) {
+        console.warn(
+          "LocalStorage quota exceeded while caching ranking; skipping cache write.",
+          e,
+        );
+        return;
+      }
+    }
     console.warn(
       "LocalStorage quota exceeded while caching ranking; skipping cache write.",
-      e,
     );
   }
 }
@@ -186,11 +236,15 @@ async function generateOnDemandRanking(
   league: number | "master" = "master",
   topN = 500,
 ): Promise<PrecomputedData | null> {
-  const species = ((gamemaster as any).pokemon ?? []).find(
-    (p: any) =>
-      String(p.dex) === String(speciesId) ||
-      String(p.speciesId) === String(speciesId),
-  );
+  // El speciesId identifica la forma y el dex sólo la especie. Al buscar por
+  // dex se devolvía siempre la primera entrada, o sea la forma base, y Mega
+  // Venusaur acababa calculándose con los stats de Venusaur. Se prueba primero
+  // la coincidencia exacta de forma y sólo después el dex, por compatibilidad.
+  const pokemonList = ((gamemaster as any).pokemon ?? []) as any[];
+  const key = String(speciesId);
+  const species =
+    pokemonList.find((p: any) => String(p.speciesId) === key) ??
+    pokemonList.find((p: any) => String(p.dex) === key);
 
   if (!species || !species.baseStats) return null;
 
@@ -291,6 +345,7 @@ async function generateOnDemandRanking(
   return {
     meta: {
       species: Number(species.dex),
+      speciesId: species.speciesId,
       name: species.speciesName,
       league: league === "master" ? "master" : String(league),
       total: list.length,
@@ -415,7 +470,20 @@ export function clearPrecomputedCache(
   league?: string | number,
 ) {
   if (speciesId && league) {
-    localStorage.removeItem(storageKey(speciesId, league));
+    // storageKey() necesita también el `top`, y las escrituras usan 4096, así
+    // que borrar una sola clave calculada aquí no acertaba nunca. Se barre por
+    // prefijo para llevarse todas las variantes de esa especie y liga.
+    const prefix = `precalc:${speciesId}:${league}:`;
+    try {
+      const matching: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(prefix)) matching.push(k);
+      }
+      matching.forEach((k) => localStorage.removeItem(k));
+    } catch (e) {
+      console.warn("Failed clearing precomputed cache", speciesId, league, e);
+    }
     return;
   }
   // clear all precomputed keys
