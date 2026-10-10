@@ -199,6 +199,74 @@ function parseFullRanking(data: any): RankedCombo[] {
         .map(({ rank: _rank, ...combo }) => combo);
 }
 
+function rankCombosForLevel(
+    lists: Record<League, RankedCombo[]>,
+    baseAtk: number,
+    baseDef: number,
+    baseHp: number,
+    maxEffectiveLevel: number,
+    hasBestBuddy: boolean,
+): Record<League, RankedCombo[]> {
+    const levels = Object.keys(CPM_TABLE)
+        .map(Number)
+        .filter((lvl) => lvl <= maxEffectiveLevel && (!hasBestBuddy || lvl >= 2))
+        .sort((a, b) => a - b);
+    const rankLeague = (list: RankedCombo[], cap: number | null) => {
+        const ranked = list.flatMap((combo) => {
+            let bestLevel = 0;
+            let bestCp = 0;
+
+            for (const lvl of levels) {
+                const cp = computeCpWithCpm(
+                    baseAtk,
+                    baseDef,
+                    baseHp,
+                    combo.atk,
+                    combo.def,
+                    combo.hp,
+                    CPM_TABLE[lvl],
+                );
+                if (cap === null || cp <= cap) {
+                    bestLevel = lvl;
+                    bestCp = cp;
+                }
+            }
+
+            if (bestLevel === 0) return [];
+
+            const cpm = CPM_TABLE[bestLevel];
+            const attack = (baseAtk + combo.atk) * cpm;
+            const defense = (baseDef + combo.def) * cpm;
+            const hp = Math.floor((baseHp + combo.hp) * cpm);
+            return [{
+                ...combo,
+                cp: bestCp,
+                bestLevel,
+                statProduct: attack * defense * hp,
+            }];
+        });
+
+        ranked.sort((a, b) =>
+            b.statProduct - a.statProduct ||
+            b.cp - a.cp ||
+            b.sum - a.sum ||
+            b.atk - a.atk ||
+            b.def - a.def,
+        );
+        const bestProduct = ranked[0]?.statProduct ?? 0;
+        return ranked.map((combo) => ({
+            ...combo,
+            pct: bestProduct > 0 ? (combo.statProduct / bestProduct) * 100 : 100,
+        }));
+    };
+
+    return {
+        great: rankLeague(lists.great, 1500),
+        ultra: rankLeague(lists.ultra, 2500),
+        master: rankLeague(lists.master, null),
+    };
+}
+
 export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesChange, onPinAnalysis }: IvCalculatorProps) {
     const { attack, defense, stamina, level } = ivValues;
     const setAttack = (value: number) => onIvValuesChange({ ...ivValues, attack: value });
@@ -214,7 +282,10 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
 
     /** Mejor PC alcanzable sin pasarse del tope de cada liga. */
     const [bestCpByLeague, setBestCpByLeague] = useState<Record<League, number>>({ great: 0, ultra: 0, master: 0 });
-    const maxLevel = isBestBuddy ? 51 : 50;
+    const maxLevel = 50;
+    const maxEffectiveLevel = isBestBuddy ? 51 : maxLevel;
+    const normalLevel = Math.min(level, maxLevel);
+    const effectiveLevel = normalLevel + (isBestBuddy ? 1 : 0);
 
     const totalIv = attack + defense + stamina;
     const percentage = ((totalIv / 45) * 100).toFixed(1);
@@ -226,6 +297,11 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
     const baseDef = baseStats?.def;
     const baseHp = baseStats?.hp;
     const speciesId = pokemon?.speciesId;
+
+    const displayRankingLists = useMemo(() => {
+        if (baseAtk === undefined || baseDef === undefined || baseHp === undefined) return EMPTY_RANKINGS;
+        return rankCombosForLevel(rankingLists, baseAtk, baseDef, baseHp, maxEffectiveLevel, isBestBuddy);
+    }, [rankingLists, baseAtk, baseDef, baseHp, maxEffectiveLevel, isBestBuddy]);
 
     // Cargar los CPM exactos de pogoapi.net una sola vez.
     useEffect(() => {
@@ -291,11 +367,11 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
         // es `cpMultipliers`, que ya está en la lista.
         const cpmDe = (lvl: number) => cpMultipliers?.[lvl] ?? CPM_TABLE[lvl] ?? 0.79030001;
 
-        setCp(computeCpWithCpm(baseAtk, baseDef, baseHp, attack, defense, stamina, cpmDe(level)));
+        setCp(computeCpWithCpm(baseAtk, baseDef, baseHp, attack, defense, stamina, cpmDe(effectiveLevel)));
 
         const levels = Object.keys(cpMultipliers ?? CPM_TABLE)
             .map(Number)
-            .filter((lvl) => lvl <= maxLevel)
+            .filter((lvl) => lvl <= maxEffectiveLevel && (!isBestBuddy || lvl >= 2))
             .filter((lvl, index, values) => values.indexOf(lvl) === index)
             .sort((a, b) => a - b);
 
@@ -310,12 +386,12 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
         });
 
         setBestCpByLeague(mejores);
-    }, [attack, defense, stamina, level, baseAtk, baseDef, baseHp, cpMultipliers, isBestBuddy, maxLevel]);
+    }, [attack, defense, stamina, effectiveLevel, baseAtk, baseDef, baseHp, cpMultipliers, isBestBuddy, maxEffectiveLevel]);
 
     const leagueCards = useMemo(
         () =>
             LEAGUE_DEFS.map((liga) => {
-                const lista = rankingLists[liga.id];
+                const lista = displayRankingLists[liga.id];
                 // La lista viene ordenada por posición, así que el índice basta.
                 const idx = lista.findIndex(
                     (it) => it.atk === attack && it.def === defense && it.hp === stamina,
@@ -325,11 +401,11 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
                     ...liga,
                     rank: idx >= 0 ? idx + 1 : null,
                     bestCp: bestCpByLeague[liga.id],
-                    bestLevel: currentCombo ? Math.min(currentCombo.bestLevel, maxLevel) : null,
+                    bestLevel: currentCombo ? Math.min(currentCombo.bestLevel, maxEffectiveLevel) : null,
                     exceedsLimit: liga.cap !== null && cp > liga.cap,
                 };
             }),
-        [rankingLists, bestCpByLeague, cp, attack, defense, stamina, maxLevel],
+        [displayRankingLists, bestCpByLeague, cp, attack, defense, stamina, maxEffectiveLevel],
     );
 
     const getRankCardStyle = (rank: number | null, exceedsLimit: boolean) => {
@@ -425,7 +501,7 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
                                         { label: 'IV', value: `${attack}/${defense}/${stamina}`, className: 'text-slate-100' },
                                         { label: '% total', value: `${percentage}%`, className: totalIv === 45 ? 'text-amber-300' : 'text-slate-100' },
                                         { label: 'PC', value: cp > 10 ? String(cp) : '—', className: 'text-slate-100' },
-                                        { label: 'Nivel', value: String(level), className: 'text-amber-300' },
+                                        { label: 'Nivel efectivo', value: String(effectiveLevel), className: 'text-amber-300' },
                                     ].map(({ label, value, className }) => (
                                         <div
                                             key={label}
@@ -494,29 +570,29 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
                     </p>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                         <span className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">
-                            Nivel del Pokémon
+                            Nivel normal del Pokémon
                         </span>
                         <input
                             type="number"
                             min="1"
                             max={maxLevel}
                             step="0.5"
-                            value={level}
+                            value={normalLevel}
                             onChange={(event) => {
                                 const nextValue = Number(event.target.value);
-                                if (Number.isInteger(nextValue) && nextValue >= 1 && nextValue <= maxLevel) {
+                                if (Number.isInteger(nextValue * 2) && nextValue >= 1 && nextValue <= maxLevel) {
                                     setLevel(nextValue);
                                 }
                             }}
                             className="w-16 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-right font-mono text-sm text-white outline-none focus:border-amber-400"
-                            aria-label="Nivel del Pokémon"
+                            aria-label="Nivel normal del Pokémon"
                         />
                         <input
                             type="range"
                             min="1"
                             max={maxLevel}
                             step="0.5"
-                            value={level}
+                            value={normalLevel}
                             onChange={(e) => setLevel(Number(e.target.value))}
                             className="h-2 min-w-40 flex-1 cursor-pointer appearance-none rounded-lg bg-slate-800 accent-amber-400"
                         />
@@ -527,7 +603,7 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
                                 onChange={(event) => {
                                     const enabled = event.target.checked;
                                     setIsBestBuddy(enabled);
-                                    if (!enabled && level > 50) setLevel(50);
+                                    if (level > maxLevel) setLevel(maxLevel);
                                 }}
                                 className="h-4 w-4 cursor-pointer accent-amber-400"
                             />
@@ -577,7 +653,7 @@ export default function IvCalculator({ baseStats, pokemon, ivValues, onIvValuesC
 
             {baseStats && (
                 <IvRanking
-                    lists={rankingLists}
+                    lists={displayRankingLists}
                     attack={attack}
                     defense={defense}
                     stamina={stamina}
